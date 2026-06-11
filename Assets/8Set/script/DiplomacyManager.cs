@@ -33,20 +33,15 @@ public class DiplomacyManager : MonoBehaviour
     {
         // Спавним AI цивілізації через невеликий затримку
         StartCoroutine(SpawnAICivilizations());
-        
-        // Запускаємо постійний AI хід для тесту
-        StartCoroutine(AITurnLoop());
+
+        // ВИМКНЕНО - AI тепер керується через кнопку "Наступний хід" в Program1
+        // StartCoroutine(AITurnLoop());
     }
     
     IEnumerator AITurnLoop()
     {
-        yield return new WaitForSeconds(3f); // Чекаємо 3 секунди після старту
-        
-        while (true)
-        {
-            yield return StartCoroutine(AITakeTurn());
-            yield return new WaitForSeconds(0.5f); // AI хід кожні 0.5 секунди
-        }
+        // ВИМКНЕНО - AI тепер керується через кнопку "Наступний хід" в Program1
+        yield break;
     }
     
     IEnumerator SpawnAICivilizations()
@@ -62,23 +57,30 @@ public class DiplomacyManager : MonoBehaviour
         
         string playerCiv = PlayerPrefs.GetString("SelectedCiv", "Rome");
         int aiIndex = 0;
-        
-        // Спавнимо AI цивілізації без ворогів - мирний режим
-        for (int i = 0; i < civNames.Length; i++)
+
+        // Створюємо список доступних цивілізацій для AI (виключаючи вибір гравця)
+        List<string> availableCivs = new List<string>();
+        foreach (string civ in civNames)
         {
-            if (civNames[i] != playerCiv && aiIndex < 3)
+            if (civ != playerCiv)
             {
-                Color civColor = GetCivColor(civNames[i]);
-                SpawnAICiv(civNames[i], civColor, aiIndex, manager);
-                aiIndex++;
+                availableCivs.Add(civ);
             }
+        }
+
+        // Спавнимо 3 AI цивілізації (гравець + 3 AI = 4 всього)
+        for (int i = 0; i < 3 && i < availableCivs.Count; i++)
+        {
+            Color civColor = GetCivColor(availableCivs[i]);
+            SpawnAICiv(availableCivs[i], civColor, aiIndex, manager);
+            aiIndex++;
         }
         
         Debug.Log("Спавнено " + aiIndex + " AI цивілізацій в мирному режимі");
-        
-        // Запускаємо перший хід AI через невеликий затримку
-        yield return new WaitForSeconds(1f);
-        StartCoroutine(AITakeTurn());
+
+        // ВИМКНЕНО - AI тепер керується через кнопку "Наступний хід" в Program1
+        // yield return new WaitForSeconds(1f);
+        // StartCoroutine(AITakeTurn());
     }
     
     public Color GetCivColor(string civName)
@@ -149,11 +151,34 @@ public class DiplomacyManager : MonoBehaviour
             }
             
             Debug.Log("Створено AI цивілізацію " + civName + " з поселенцем та воїном");
+
+            // Створюємо CivilizationAI контролер для цієї цивілізації
+            CreateCivilizationAI(civName, civColor);
         }
         else
         {
             Debug.LogWarning("Не вдалося знайти позицію для AI цивілізації " + civName);
         }
+    }
+
+    void CreateCivilizationAI(string civName, Color civColor)
+    {
+        // Перевіряємо чи вже існує CivilizationAI для цієї цивілізації
+        CivilizationAI[] existingAIs = Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None);
+        foreach (CivilizationAI existingAI in existingAIs)
+        {
+            if (existingAI != null && existingAI.civilizationName == civName)
+            {
+                Debug.Log($"CivilizationAI для {civName} вже існує");
+                return;
+            }
+        }
+
+        // Створюємо новий GameObject з CivilizationAI
+        GameObject aiObj = new GameObject(civName + "_AI");
+        CivilizationAI newAI = aiObj.AddComponent<CivilizationAI>();
+        newAI.SetCivilizationName(civName);
+        Debug.Log($"Створено CivilizationAI для {civName}");
     }
     
     Vector3Int FindAISpawnPosition(int index, Program1 manager)
@@ -231,31 +256,55 @@ public class DiplomacyManager : MonoBehaviour
     {
         if (obj == null) return;
 
-        SpriteRenderer sr = obj.GetComponentInChildren<SpriteRenderer>();
-        if (sr == null) return;
+        foreach (SpriteRenderer sr in obj.GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (sr == null) continue;
 
-        sr.material = new Material(Shader.Find("Sprites/Default"));
-        sr.color = civColor;
-        sr.material.SetColor("_Color", civColor);
-        sr.material.EnableKeyword("_EMISSION");
-        sr.material.SetColor("_EmissionColor", civColor * 0.5f);
+            // Фарбуємо тільки одяг (body, clothes, armor, tunic, cape, etc.)
+            string lowerName = sr.name.ToLower();
+            bool isClothing = lowerName.Contains("body") || lowerName.Contains("clothes") ||
+                            lowerName.Contains("armor") || lowerName.Contains("tunic") ||
+                            lowerName.Contains("cape") || lowerName.Contains("robe") ||
+                            lowerName.Contains("cloth") || lowerName.Contains("outfit");
+
+            if (isClothing)
+            {
+                sr.material = new Material(Shader.Find("Sprites/Default"));
+                sr.color = civColor;
+                sr.material.SetColor("_Color", civColor);
+                sr.material.EnableKeyword("_EMISSION");
+                sr.material.SetColor("_EmissionColor", civColor * 0.5f);
+            }
+        }
+
+        UnitSetup.ApplySorting(obj.transform);
     }
 
     void CreateAICityDirectly(Program1 manager, Vector3Int pos, string civName, Color civColor)
     {
         if (manager == null || manager.cityPrefab == null || manager.HasCityAt(pos)) return;
 
+        bool isCapital = manager.allCities.Find(c => c != null && c.ownerCivName == civName) == null;
+        string generatedName = CityLabel.GenerateCityName(civName, isCapital);
+
         Vector3 worldPos = manager.tilemap.GetCellCenterWorld(pos);
         GameObject cityObj = Instantiate(manager.cityPrefab, new Vector3(worldPos.x, worldPos.y - 0.2f, -0.15f), Quaternion.identity);
+        cityObj.name = civName + "_" + generatedName;
 
         City city = cityObj.GetComponent<City>() ?? cityObj.AddComponent<City>();
         city.gridPosition = pos;
         city.isPlayerCity = false;
         city.ownerCivName = civName;
+        city.isCapital = isCapital;
+        city.cityName = generatedName;
         city.Init(pos, manager.tilemap);
+        city.SetupLabel(civName, civColor);
 
         ApplyUnitColor(cityObj, civColor);
         manager.RegisterCity(city);
+
+        FogOfWarManager fog = manager.GetFogOfWar();
+        if (fog != null) fog.RevealAllPlayerUnits();
     }
     
     GameObject CreateAIUnit(GameObject prefab, Vector3Int cellPos, string name, Color color, bool isPlayer)
@@ -310,18 +359,35 @@ public class DiplomacyManager : MonoBehaviour
     
     public void DeclareWar(string targetCiv = null)
     {
-        isAtWar = true;
-
-        Debug.Log("ВІЙНА ОГОЛОШЕНА ПРОТИ ВСІХ ВОРІГІВ!");
-        enemyNations.Clear();
-
-        // Якщо кнопку війни повісили напряму на цей метод - теж ховаємо її.
         Program1 manager = Object.FindAnyObjectByType<Program1>();
+        if (string.IsNullOrEmpty(targetCiv) && manager != null)
+            targetCiv = manager.pendingWarTargetCiv;
+
+        if (string.IsNullOrEmpty(targetCiv))
+        {
+            Debug.LogWarning("DeclareWar: ціль не вказана.");
+            return;
+        }
+
+        if (!enemyNations.Contains(targetCiv))
+            enemyNations.Add(targetCiv);
+
+        isAtWar = enemyNations.Count > 0;
+        Debug.Log("Війна оголошена проти: " + targetCiv);
+
         if (manager != null)
         {
+            manager.isAtWar = isAtWar;
+            manager.pendingWarTargetCiv = "";
             manager.HideWarButton();
-            manager.isAtWar = true;
         }
+    }
+
+    public bool IsAtWarWith(string civName)
+    {
+        if (string.IsNullOrEmpty(civName) || civName == "Unknown" || civName == "Player")
+            return false;
+        return enemyNations.Contains(civName);
     }
 
     // Універсальний метод для UI кнопки "Declare war".
@@ -370,8 +436,9 @@ public class DiplomacyManager : MonoBehaviour
         {
             if (unit == null || unit.currentMovement <= 0) continue;
 
-            // Примусовий бойовий пріоритет: під час війни AI має атакувати гравця.
-            if (isAtWar)
+            // AI атакує гравця лише якщо його цивілізація в стані війни з гравцем.
+            string aiCiv = unit.GetCivName(manager);
+            if (IsAtWarWith(aiCiv))
             {
                 Unit playerTarget = FindNearestPlayerUnit(unit, manager);
                 if (playerTarget != null)
@@ -468,11 +535,6 @@ public class DiplomacyManager : MonoBehaviour
         }
     }
     
-    public bool IsAtWarWith(string civName)
-    {
-        return isAtWar && enemyNations.Contains(civName);
-    }
-    
     // Нові методи для сумісності з CivilizationAI
     public void NextTurn()
     {
@@ -488,16 +550,7 @@ public class DiplomacyManager : MonoBehaviour
     
     public void DeclareWar(string civilization1, string civilization2)
     {
-        isAtWar = true;
-        Debug.Log($"Війна оголошена: {civilization1} проти всіх");
-        enemyNations.Clear();
-
-        Program1 manager = Object.FindAnyObjectByType<Program1>();
-        if (manager != null)
-        {
-            manager.HideWarButton();
-            manager.isAtWar = true;
-        }
+        DeclareWar(civilization2);
     }
     
     public bool IsAtWar(string civilization1, string civilization2)

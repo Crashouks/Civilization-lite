@@ -6,6 +6,8 @@ public class City : MonoBehaviour
     public Vector3Int gridPosition;
     public bool isPlayerCity = false;
     public string ownerCivName = "Unknown";
+    public string cityName = "City";
+    public bool isCapital;
     
     void Start()
     {
@@ -59,5 +61,24 @@ public class City : MonoBehaviour
         {
             manager.OnCityClicked(this);
         }
+    }
+
+    public void SetFogVisibility(bool visible)
+    {
+        CityLabel label = GetComponent<CityLabel>();
+        if (label != null)
+            label.SetVisible(visible);
+
+        foreach (SpriteRenderer sr in GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (sr == null || sr.GetComponentInParent<CityLabel>() != null) continue;
+            sr.enabled = visible;
+        }
+    }
+
+    public void SetupLabel(string civName, Color civColor)
+    {
+        CityLabel label = GetComponent<CityLabel>() ?? gameObject.AddComponent<CityLabel>();
+        label.Setup(cityName, civName, civColor, isCapital);
     }
 }

@@ -788,6 +788,7 @@ MonoBehaviour:
   warriorPrefab: {fileID: 1000011742669328, guid: 315058484cf2044ce8dcb608b4678ff6, type: 3}
   pathRenderer: {fileID: 619826736}
   selectedUnit: {fileID: 0}
+  pendingWarTargetCiv: 
   allUnits: []
   cityPrefab: {fileID: 2015113699}
   warButton: {fileID: 0}

@@ -1,172 +1,168 @@
-using UnityEngine;
 using System.Collections;
+using UnityEngine;
 
 public class UnitAnimator : MonoBehaviour
 {
-    private Unit unit;
-    private SpriteRenderer spriteRenderer;
-    private Vector3 lastPosition;
-    private bool isMoving = false;
-    
-    [Header("Налаштування анімації")]
-    public float animationSpeed = 0.2f;
-    public float bounceHeight = 0.15f;
-    public float bounceSpeed = 8f;
-    
-    void Start()
+    Animator animator;
+    Transform flipRoot;
+
+    public void EnsureReady()
     {
-        unit = GetComponent<Unit>();
-        spriteRenderer = GetComponentInChildren<SpriteRenderer>();
-        
-        lastPosition = transform.position;
-        
-        // Завжди запускаємо просту анімацію через корутини
-        StartCoroutine(SimpleAnimation());
-    }
-    
-    void Update()
-    {
-        // Перевіряємо чи юніт рухається
-        if (Vector3.Distance(transform.position, lastPosition) > 0.01f)
+        if (animator == null)
+            animator = GetComponent<Animator>() ?? GetComponentInChildren<Animator>(true);
+        if (flipRoot == null)
         {
-            if (!isMoving)
-            {
-                StartMovingAnimation();
-            }
-            isMoving = true;
+            Transform body = transform.Find("Body");
+            flipRoot = body != null ? body : transform;
+        }
+    }
+
+    public void PlayIdle()
+    {
+        EnsureReady();
+        SetWalking(false);
+    }
+
+    public void PlayWalk()
+    {
+        EnsureReady();
+        SetWalking(true);
+    }
+
+    void SetWalking(bool walking)
+    {
+        if (animator == null) return;
+
+        if (HasParameter("IsWalking"))
+            animator.SetBool("IsWalking", walking);
+
+        if (walking)
+        {
+            animator.ResetTrigger("idle");
+            if (animator.HasState(0, Animator.StringToHash("walk")))
+                animator.Play("walk", 0, 0f);
+            else
+                SetTrigger("walk");
         }
         else
         {
-            if (isMoving)
-            {
-                StopMovingAnimation();
-            }
-            isMoving = false;
+            animator.ResetTrigger("walk");
+            if (animator.HasState(0, Animator.StringToHash("idle")))
+                animator.Play("idle", 0, 0f);
+            else
+                SetTrigger("idle");
         }
-        
-        lastPosition = transform.position;
+
+        animator.Update(0f);
     }
-    
-    void StartMovingAnimation()
+
+    public void PlayAttack()
     {
-        // Завжди використовуємо корутини анімації, оскільки Animator параметри відсутні
-        StartCoroutine(MoveBounce());
+        EnsureReady();
+        SetWalking(false);
+        if (animator.HasState(0, Animator.StringToHash("attack")))
+            animator.Play("attack", 0, 0f);
+        SetTrigger("Attack");
+        SetTrigger("attack");
+        animator.Update(0f);
     }
-    
-    void StopMovingAnimation()
+
+    public void PlayHurt()
     {
-        // Нічого не робимо - корутини зупиняться автоматично
-        // Animator не використовується, оскільки параметри відсутні
+        EnsureReady();
+        SetTrigger("Hurt");
+        SetTrigger("hurt");
     }
-    
-    IEnumerator SimpleAnimation()
-    {
-        while (true)
-        {
-            // Проста idle анімація - легке підстрибування
-            float time = Time.time;
-            Vector3 basePos = transform.position;
-            
-            for (float t = 0; t < 2f; t += Time.deltaTime)
-            {
-                float bounce = Mathf.Sin(time * bounceSpeed + t * Mathf.PI) * bounceHeight * 0.3f;
-                transform.position = basePos + Vector3.up * bounce;
-                yield return null;
-            }
-            
-            yield return null;
-        }
-    }
-    
-    IEnumerator MoveBounce()
-    {
-        Vector3 basePos = transform.position;
-        float startTime = Time.time;
-        
-        while (isMoving)
-        {
-            float elapsed = Time.time - startTime;
-            float bounce = Mathf.Sin(elapsed * bounceSpeed) * bounceHeight;
-            transform.position = basePos + Vector3.up * bounce;
-            yield return null;
-        }
-        
-        // Повертаємо на базову позицію
-        transform.position = basePos;
-    }
-    
-    public void PlayAttackAnimation()
-    {
-        // Використовуємо корутину атаки замість Animator
-        StartCoroutine(AttackBounce());
-    }
-    
-    IEnumerator AttackBounce()
-    {
-        Vector3 basePos = transform.position;
-        
-        // Анімація атаки - різкий стрибок вперед і назад
-        for (float t = 0; t < 0.2f; t += Time.deltaTime)
-        {
-            transform.position = basePos + Vector3.right * (t * 2f);
-            yield return null;
-        }
-        
-        for (float t = 0; t < 0.2f; t += Time.deltaTime)
-        {
-            transform.position = basePos + Vector3.right * (0.4f - t * 2f);
-            yield return null;
-        }
-        
-        transform.position = basePos;
-    }
-    
+
+    public void PlayAttackAnimation() => PlayAttack();
+
     public void PlayDeathAnimation()
     {
-        // Використовуємо корутину смерті замість Animator
-        StartCoroutine(DeathFade());
+        EnsureReady();
+        SetWalking(false);
+        SetTrigger("Die");
+        SetTrigger("die");
     }
-    
-    IEnumerator DeathFade()
-    {
-        if (spriteRenderer != null)
-        {
-            Color startColor = spriteRenderer.color;
-            Vector3 baseScale = transform.localScale;
-            
-            for (float t = 0; t < 1f; t += Time.deltaTime)
-            {
-                spriteRenderer.color = Color.Lerp(startColor, Color.clear, t);
-                transform.localScale = Vector3.Lerp(baseScale, Vector3.zero, t);
-                transform.Rotate(0, 0, t * 360f);
-                yield return null;
-            }
-        }
-    }
-    
+
     public void PlaySettleAnimation()
     {
-        // Використовуємо корутину заснування міста замість Animator
-        StartCoroutine(SettleBounce());
+        EnsureReady();
+        SetWalking(false);
+        SetTrigger("idle");
     }
-    
-    IEnumerator SettleBounce()
+
+    public float GetAttackDuration()
     {
-        Vector3 basePos = transform.position;
-        
-        // Анімація заснування міста - кілька радісних стрибків
-        for (int i = 0; i < 3; i++)
+        EnsureReady();
+        if (animator != null && animator.runtimeAnimatorController != null)
         {
-            for (float t = 0; t < 0.3f; t += Time.deltaTime)
+            foreach (AnimationClip clip in animator.runtimeAnimatorController.animationClips)
             {
-                float bounce = Mathf.Sin(t * Mathf.PI / 0.3f) * bounceHeight * 2f;
-                transform.position = basePos + Vector3.up * bounce;
-                yield return null;
+                if (clip != null && clip.name.ToLower().Contains("attack"))
+                    return clip.length;
             }
-            
-            yield return new WaitForSeconds(0.1f);
         }
-        
-        transform.position = basePos;
+        return 0.55f;
+    }
+
+    public float GetDeathDuration() => 0.8f;
+
+    public void FaceToward(Vector3 direction)
+    {
+        if (Mathf.Abs(direction.x) < 0.01f) return;
+
+        EnsureReady();
+        Vector3 scale = flipRoot.localScale;
+        scale.x = direction.x < 0f ? -Mathf.Abs(scale.x) : Mathf.Abs(scale.x);
+        flipRoot.localScale = scale;
+    }
+
+    public IEnumerator PlayAttackRoutine(Unit target, int damage)
+    {
+        if (target == null) yield break;
+
+        PlayAttack();
+
+        float duration = GetAttackDuration();
+        float hitTime = duration * 0.45f;
+        float elapsed = 0f;
+        bool hit = false;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            if (!hit && elapsed >= hitTime)
+            {
+                hit = true;
+                target.TakeDamage(damage);
+            }
+            yield return null;
+        }
+
+        PlayIdle();
+    }
+
+    public IEnumerator WalkTo(Vector3 worldTarget)
+    {
+        PlayWalk();
+        while (Vector3.Distance(transform.position, worldTarget) > 0.005f)
+            yield return null;
+        PlayIdle();
+    }
+
+    void SetTrigger(string name)
+    {
+        if (animator != null && HasParameter(name))
+            animator.SetTrigger(name);
+    }
+
+    bool HasParameter(string name)
+    {
+        if (animator == null) return false;
+        foreach (AnimatorControllerParameter p in animator.parameters)
+        {
+            if (p.name == name) return true;
+        }
+        return false;
     }
 }
