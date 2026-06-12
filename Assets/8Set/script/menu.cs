@@ -14,6 +14,11 @@ public class MainMenu : MonoBehaviour
     private CivMainMenuUI civUI;
 
     void Awake()
+    [Header("UI Ïàíåë³")]
+    public GameObject mainMenuPanel;
+    public GameObject civSelectionPanel;
+
+    public void OpenCivSelection()
     {
         FixCanvas();
         AudioListener.volume = PlayerPrefs.GetFloat("MasterVolume", 0.8f);
@@ -33,6 +38,7 @@ public class MainMenu : MonoBehaviour
     }
 
     void HideLegacyUI()
+    public void BackToMenu()
     {
         if (mainMenuPanel != null) mainMenuPanel.SetActive(false);
         if (civSelectionPanel != null) civSelectionPanel.SetActive(false);
@@ -96,6 +102,32 @@ public class MainMenu : MonoBehaviour
         PlayerPrefs.SetInt(LoadOnStartKey, 0);
         PlayerPrefs.SetString("SelectedCiv", civName);
         PlayerPrefs.Save();
+    public void ContinueGame()
+    {
+        if (!SaveManager.HasSave())
+        {
+            Debug.LogWarning("Íåìàº çáåðåæåíî¿ ãðè");
+            return;
+        }
+
+        PlayerPrefs.SetInt(SaveManager.LoadOnStartKey, 1);
+        PlayerPrefs.Save();
+        SceneManager.LoadScene("Gamescena");
+    }
+
+    public bool CanContinue()
+    {
+        return SaveManager.HasSave();
+    }
+
+    public void SelectCivilization(string civName)
+    {
+        SaveManager.LoadedFromSaveThisSession = false;
+
+        PlayerPrefs.SetString("SelectedCiv", civName);
+        PlayerPrefs.Save();
+
+        Debug.Log("Âèáðàíî: " + civName + ". Çàâàíòàæåííÿ ñöåíè...");
         SceneManager.LoadScene("Gamescena");
     }
 

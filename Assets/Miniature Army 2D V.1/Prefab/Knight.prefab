@@ -10,6 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 4000011028196368}
   - component: {fileID: 95000011895321844}
+  - component: {fileID: 7373473079336198311}
+  - component: {fileID: 7765070835852789409}
   m_Layer: 0
   m_Name: Knight
   m_TagString: Untagged
@@ -55,6 +57,45 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &7373473079336198311
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000010755293042}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4edfa3aa4a744442ae27b5e38c0c169, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Unit
+  isPlayer: 1
+  health: 100
+  attackPower: 25
+  maxMovement: 3
+  currentMovement: 0
+  moveSpeed: 4
+  gridPosition: {x: 0, y: 0, z: 0}
+  isSelected: 0
+  selectionCircle: {fileID: 0}
+  spriteRenderer: {fileID: 0}
+  selectedColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+--- !u!114 &7765070835852789409
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000010755293042}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abe7ef79e04f62044bba4314a1857b82, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnitAnimator
+  animationSpeed: 0.2
+  bounceHeight: 0.15
+  bounceSpeed: 8
 --- !u!1 &1000011164445256
 GameObject:
   m_ObjectHideFlags: 0

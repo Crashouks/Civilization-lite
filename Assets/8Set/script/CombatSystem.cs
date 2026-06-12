@@ -53,6 +53,7 @@ public class CombatSystem : MonoBehaviour
     void Start()
     {
         InitializeUnitStats();
+        CacheMapManager();
     }
     
     void InitializeUnitStats()
@@ -63,17 +64,32 @@ public class CombatSystem : MonoBehaviour
         unitStats["Archer"] = new UnitStats("Archer", 15, 5, 3, 2, 2);
         unitStats["Swordsman"] = new UnitStats("Swordsman", 25, 7, 6, 2, 1);
         unitStats["Horseman"] = new UnitStats("Horseman", 18, 8, 4, 4, 1);
+        unitStats["Scout"] = new UnitStats("Scout", 12, 4, 2, 4, 1);
+    }
+
+    void CacheMapManager()
+    {
+        if (mapManager == null)
+            mapManager = Object.FindAnyObjectByType<Program1>();
     }
     
     public bool CanAttack(Unit attacker, Unit defender)
     {
         if (attacker == null || defender == null) return false;
-        if (attacker.isPlayer == defender.isPlayer) return false; // Не можна атакувати своїх
-        if (attacker.currentMovement <= 0) return false; // Немає очок руху
-        
+        if (attacker.isPlayer == defender.isPlayer) return false;
+        if (attacker.currentMovement <= 0) return false;
+
+        DiplomacyManager diplomacy = DiplomacyManager.Instance;
+        if (diplomacy != null)
+        {
+            string defenderCiv = defender.GetCivName();
+            if (attacker.isPlayer && !diplomacy.IsAtWarWith(defenderCiv))
+                return false;
+        }
+
         UnitStats attackerStats = GetUnitStats(attacker);
-        if (attackerStats.attackRange == 0) return false; // Юніт не може атакувати
-        
+        if (attackerStats.attackRange == 0) return false;
+
         int distance = CalculateDistance(attacker.gridPosition, defender.gridPosition);
         return distance <= attackerStats.attackRange;
     }
@@ -90,35 +106,42 @@ public class CombatSystem : MonoBehaviour
         UnitStats defenderStats = GetUnitStats(defender);
         
         Debug.Log($"{attacker.name} атакує {defender.name}!");
-        
-        // Показуємо ефект атаки
-        if (combatEffectPrefab != null)
+
+        UnitAnimator attackerAnim = attacker.GetComponent<UnitAnimator>();
+        Program1 map = Object.FindAnyObjectByType<Program1>();
+        if (attackerAnim != null && map != null && map.tilemap != null)
         {
-            GameObject effect = Instantiate(combatEffectPrefab, 
-                mapManager.tilemap.GetCellCenterWorld(defender.gridPosition), 
+            Vector3 defenderPos = map.tilemap.GetCellCenterWorld(defender.gridPosition);
+            defenderPos.y -= 1f;
+            attackerAnim.FaceToward(defenderPos - attacker.transform.position);
+            yield return StartCoroutine(attackerAnim.PlayAttackRoutine(defender, CalculateDamage(attackerStats, defenderStats)));
+        
+        CacheMapManager();
+        if (combatEffectPrefab != null && mapManager != null && mapManager.tilemap != null)
+        {
+            GameObject effect = Instantiate(combatEffectPrefab,
+                mapManager.tilemap.GetCellCenterWorld(defender.gridPosition),
                 Quaternion.identity);
             Destroy(effect, combatAnimationDuration);
         }
-        
-        // Розраховуємо пошкодження
-        int damage = CalculateDamage(attackerStats, defenderStats);
-        
-        // Застосовуємо пошкодження
-        bool defenderDestroyed = ApplyDamage(defender, damage);
-        
-        // Витрачаємо очки руху атакуючого
-        attacker.currentMovement = 0;
-        
-        // Анімація атаки
-        yield return new WaitForSeconds(combatAnimationDuration);
-        
-        // Повідомляємо про результат
-        if (defenderDestroyed)
+        else
         {
-            OnUnitDestroyed(attacker, defender);
+            int damage = CalculateDamage(attackerStats, defenderStats);
+            bool defenderDestroyed = ApplyDamage(defender, damage);
+            if (defenderDestroyed)
+                OnUnitDestroyed(attacker, defender);
         }
-        
-        // Перевіряємо на завершення бою
+
+        attacker.currentMovement = 0;
+
+        if (combatEffectPrefab != null && map != null && map.tilemap != null)
+        {
+            GameObject effect = Instantiate(combatEffectPrefab,
+                map.tilemap.GetCellCenterWorld(defender.gridPosition),
+                Quaternion.identity);
+            Destroy(effect, combatAnimationDuration);
+        }
+
         CheckCombatEnd(attacker, defender);
     }
     
@@ -167,7 +190,9 @@ public class CombatSystem : MonoBehaviour
     
     void OnUnitDestroyed(Unit attacker, Unit defender)
     {
-        // Повідомляємо дипломатичну систему
+        if (EconomyManager.Instance != null)
+            EconomyManager.Instance.AwardKillReward(attacker, defender);
+
         DiplomacyManager diplomacy = Object.FindAnyObjectByType<DiplomacyManager>();
         if (diplomacy != null)
         {
@@ -244,6 +269,7 @@ public class CombatSystem : MonoBehaviour
     UnitStats GetUnitStats(Unit unit)
     {
         string unitType = unit.name.Contains("Settler") ? "Settler" :
+                         unit.name.Contains("Scout") ? "Scout" :
                          unit.name.Contains("Warrior") ? "Warrior" :
                          unit.name.Contains("Archer") ? "Archer" :
                          unit.name.Contains("Swordsman") ? "Swordsman" :
