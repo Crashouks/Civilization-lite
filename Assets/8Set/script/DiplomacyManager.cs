@@ -46,8 +46,14 @@ public class DiplomacyManager : MonoBehaviour
     
     IEnumerator SpawnAICivilizations()
     {
-        yield return new WaitForSeconds(2f); // Чекаємо поки гравець заспавниться
-        
+        yield return new WaitForSeconds(2f);
+
+        if (SaveManager.LoadedFromSaveThisSession)
+        {
+            Debug.Log("Пропускаємо спавн AI — гра завантажена зі збереження");
+            yield break;
+        }
+
         Program1 manager = Object.FindAnyObjectByType<Program1>();
         if (manager == null)
         {

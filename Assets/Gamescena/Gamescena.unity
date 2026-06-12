@@ -786,6 +786,9 @@ MonoBehaviour:
   snowMountainTile: {fileID: 11400000, guid: ff318adc52d4b394787c29852a7e5873, type: 2}
   settlerPrefab: {fileID: 1000013034572668, guid: 389c7e1a1dabb4e1e917001420b89c9a, type: 3}
   warriorPrefab: {fileID: 1000011742669328, guid: 315058484cf2044ce8dcb608b4678ff6, type: 3}
+  scoutPrefab: {fileID: 1000012663239756, guid: 13c470c5b8dcd4854834911f7e0a9a6c, type: 3}
+  maxScouts: 4
+  maxWarriors: 20
   pathRenderer: {fileID: 619826736}
   selectedUnit: {fileID: 0}
   pendingWarTargetCiv: 
