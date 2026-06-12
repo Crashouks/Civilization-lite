@@ -33,7 +33,16 @@ public class TurnManager : MonoBehaviour
         
         currentTurn++;
         Debug.Log("=== НАЧАТОК ХОДУ " + currentTurn + " ===");
-        
+
+        if (FogOfWarManager.Instance != null)
+            FogOfWarManager.Instance.RefreshVisibility();
+
+        if (GameUI.Instance != null)
+            GameUI.Instance.RefreshTurn();
+
+        if (SaveManager.Instance != null)
+            SaveManager.Instance.SaveGame();
+
         // Запускаємо хід AI (завжди, а не тільки під час війни)
         if (DiplomacyManager.Instance != null)
         {

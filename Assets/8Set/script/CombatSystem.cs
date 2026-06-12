@@ -53,6 +53,7 @@ public class CombatSystem : MonoBehaviour
     void Start()
     {
         InitializeUnitStats();
+        CacheMapManager();
     }
     
     void InitializeUnitStats()
@@ -63,6 +64,13 @@ public class CombatSystem : MonoBehaviour
         unitStats["Archer"] = new UnitStats("Archer", 15, 5, 3, 2, 2);
         unitStats["Swordsman"] = new UnitStats("Swordsman", 25, 7, 6, 2, 1);
         unitStats["Horseman"] = new UnitStats("Horseman", 18, 8, 4, 4, 1);
+        unitStats["Scout"] = new UnitStats("Scout", 12, 4, 2, 4, 1);
+    }
+
+    void CacheMapManager()
+    {
+        if (mapManager == null)
+            mapManager = Object.FindAnyObjectByType<Program1>();
     }
     
     public bool CanAttack(Unit attacker, Unit defender)
@@ -91,11 +99,11 @@ public class CombatSystem : MonoBehaviour
         
         Debug.Log($"{attacker.name} атакує {defender.name}!");
         
-        // Показуємо ефект атаки
-        if (combatEffectPrefab != null)
+        CacheMapManager();
+        if (combatEffectPrefab != null && mapManager != null && mapManager.tilemap != null)
         {
-            GameObject effect = Instantiate(combatEffectPrefab, 
-                mapManager.tilemap.GetCellCenterWorld(defender.gridPosition), 
+            GameObject effect = Instantiate(combatEffectPrefab,
+                mapManager.tilemap.GetCellCenterWorld(defender.gridPosition),
                 Quaternion.identity);
             Destroy(effect, combatAnimationDuration);
         }
@@ -167,7 +175,9 @@ public class CombatSystem : MonoBehaviour
     
     void OnUnitDestroyed(Unit attacker, Unit defender)
     {
-        // Повідомляємо дипломатичну систему
+        if (EconomyManager.Instance != null)
+            EconomyManager.Instance.AwardKillReward(attacker, defender);
+
         DiplomacyManager diplomacy = Object.FindAnyObjectByType<DiplomacyManager>();
         if (diplomacy != null)
         {
@@ -244,6 +254,7 @@ public class CombatSystem : MonoBehaviour
     UnitStats GetUnitStats(Unit unit)
     {
         string unitType = unit.name.Contains("Settler") ? "Settler" :
+                         unit.name.Contains("Scout") ? "Scout" :
                          unit.name.Contains("Warrior") ? "Warrior" :
                          unit.name.Contains("Archer") ? "Archer" :
                          unit.name.Contains("Swordsman") ? "Swordsman" :
