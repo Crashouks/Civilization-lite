@@ -7,25 +7,21 @@ using TMPro;
 [RequireComponent(typeof(Button))]
 public class MenuButtonAnimator : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
-    [Header("Анімація")]
-    public float hoverOffsetX = 14f;
-    public float hoverScale = 1.02f;
-    public float duration = 0.18f;
+    public float hoverOffsetX = 6f;
+    public float duration = 0.15f;
 
-    [Header("Кольори")]
-    public Color normalBg = new Color(0.08f, 0.14f, 0.22f, 0.92f);
-    public Color hoverBg = new Color(0.12f, 0.22f, 0.34f, 0.96f);
-    public Color disabledBg = new Color(0.06f, 0.08f, 0.12f, 0.55f);
-    public Color normalText = new Color(0.94f, 0.9f, 0.82f, 1f);
-    public Color hoverText = new Color(1f, 0.92f, 0.55f, 1f);
-    public Color disabledText = new Color(0.5f, 0.5f, 0.5f, 0.6f);
+    public Color normalBg = new Color(0.14f, 0.09f, 0.05f, 0.72f);
+    public Color hoverBg = new Color(0.22f, 0.14f, 0.06f, 0.88f);
+    public Color disabledBg = new Color(0.08f, 0.06f, 0.05f, 0.45f);
+    public Color normalText = new Color(0.96f, 0.91f, 0.82f, 1f);
+    public Color hoverText = new Color(1f, 0.88f, 0.45f, 1f);
+    public Color disabledText = new Color(0.55f, 0.5f, 0.45f, 0.55f);
 
-    private RectTransform rect;
     private Image background;
     private Image accentBar;
     private TextMeshProUGUI label;
-    private Vector2 basePosition;
-    private Vector3 baseScale;
+    private RectTransform labelRect;
+    private Vector2 labelBasePos;
     private Coroutine animRoutine;
     private bool isHovered;
     private Button button;
@@ -35,11 +31,10 @@ public class MenuButtonAnimator : MonoBehaviour, IPointerEnterHandler, IPointerE
         background = bg;
         accentBar = accent;
         label = text;
-        rect = GetComponent<RectTransform>();
-        basePosition = rect.anchoredPosition;
-        baseScale = rect.localScale;
+        labelRect = text != null ? text.rectTransform : null;
+        if (labelRect != null) labelBasePos = labelRect.anchoredPosition;
         button = GetComponent<Button>();
-        ApplyInstant(false, !button.interactable);
+        ApplyInstant(false, button != null && !button.interactable);
     }
 
     public void SetInteractable(bool value)
@@ -61,35 +56,12 @@ public class MenuButtonAnimator : MonoBehaviour, IPointerEnterHandler, IPointerE
         Animate(false);
     }
 
-    public void PlayIntro(float delay)
+    public void ShowInstant()
     {
-        StartCoroutine(IntroRoutine(delay));
-    }
-
-    IEnumerator IntroRoutine(float delay)
-    {
-        if (rect == null) yield break;
-
-        Vector2 startPos = basePosition + new Vector2(-80f, 0f);
-        rect.anchoredPosition = startPos;
-        CanvasGroup cg = GetComponent<CanvasGroup>();
-        if (cg == null) cg = gameObject.AddComponent<CanvasGroup>();
-        cg.alpha = 0f;
-
-        if (delay > 0f) yield return new WaitForSeconds(delay);
-
-        float t = 0f;
-        while (t < 0.45f)
-        {
-            t += Time.deltaTime;
-            float k = Mathf.SmoothStep(0f, 1f, t / 0.45f);
-            rect.anchoredPosition = Vector2.Lerp(startPos, basePosition, k);
-            cg.alpha = k;
-            yield return null;
-        }
-
-        rect.anchoredPosition = basePosition;
-        cg.alpha = 1f;
+        if (background != null) background.color = button != null && !button.interactable ? disabledBg : normalBg;
+        if (label != null) label.color = button != null && !button.interactable ? disabledText : normalText;
+        if (accentBar != null) { Color c = accentBar.color; c.a = 0f; accentBar.color = c; }
+        if (labelRect != null) labelRect.anchoredPosition = labelBasePos;
     }
 
     void Animate(bool hover)
@@ -101,27 +73,24 @@ public class MenuButtonAnimator : MonoBehaviour, IPointerEnterHandler, IPointerE
     IEnumerator AnimateRoutine(bool hover)
     {
         bool disabled = button != null && !button.interactable;
-        Vector2 targetPos = hover && !disabled ? basePosition + new Vector2(hoverOffsetX, 0f) : basePosition;
-        Vector3 targetScale = hover && !disabled ? baseScale * hoverScale : baseScale;
         Color targetBg = disabled ? disabledBg : (hover ? hoverBg : normalBg);
         Color targetText = disabled ? disabledText : (hover ? hoverText : normalText);
         float targetAccent = hover && !disabled ? 1f : 0f;
+        Vector2 targetLabelPos = labelBasePos + new Vector2(hover && !disabled ? hoverOffsetX : 0f, 0f);
 
-        Vector2 startPos = rect.anchoredPosition;
-        Vector3 startScale = rect.localScale;
         Color startBg = background != null ? background.color : normalBg;
         Color startText = label != null ? label.color : normalText;
         float startAccent = accentBar != null ? accentBar.color.a : 0f;
+        Vector2 startLabelPos = labelRect != null ? labelRect.anchoredPosition : targetLabelPos;
 
         float t = 0f;
         while (t < duration)
         {
             t += Time.deltaTime;
             float k = Mathf.SmoothStep(0f, 1f, t / duration);
-            rect.anchoredPosition = Vector2.Lerp(startPos, targetPos, k);
-            rect.localScale = Vector3.Lerp(startScale, targetScale, k);
             if (background != null) background.color = Color.Lerp(startBg, targetBg, k);
             if (label != null) label.color = Color.Lerp(startText, targetText, k);
+            if (labelRect != null) labelRect.anchoredPosition = Vector2.Lerp(startLabelPos, targetLabelPos, k);
             if (accentBar != null)
             {
                 Color c = accentBar.color;
@@ -131,27 +100,15 @@ public class MenuButtonAnimator : MonoBehaviour, IPointerEnterHandler, IPointerE
             yield return null;
         }
 
-        rect.anchoredPosition = targetPos;
-        rect.localScale = targetScale;
-        if (background != null) background.color = targetBg;
-        if (label != null) label.color = targetText;
-        if (accentBar != null)
-        {
-            Color c = accentBar.color;
-            c.a = targetAccent;
-            accentBar.color = c;
-        }
+        ApplyInstant(hover, disabled);
+        animRoutine = null;
     }
 
     void ApplyInstant(bool hover, bool disabled)
     {
-        if (rect != null)
-        {
-            rect.anchoredPosition = hover && !disabled ? basePosition + new Vector2(hoverOffsetX, 0f) : basePosition;
-            rect.localScale = hover && !disabled ? baseScale * hoverScale : baseScale;
-        }
         if (background != null) background.color = disabled ? disabledBg : (hover ? hoverBg : normalBg);
         if (label != null) label.color = disabled ? disabledText : (hover ? hoverText : normalText);
+        if (labelRect != null) labelRect.anchoredPosition = labelBasePos + new Vector2(hover && !disabled ? hoverOffsetX : 0f, 0f);
         if (accentBar != null)
         {
             Color c = accentBar.color;

@@ -8,6 +8,36 @@ public class City : MonoBehaviour
     public string ownerCivName = "Unknown";
     public string cityName = "City";
     public bool isCapital;
+
+    public string GetDisplayName()
+    {
+        if (!string.IsNullOrEmpty(cityName) && cityName != "City")
+            return cityName;
+
+        if (!string.IsNullOrEmpty(ownerCivName) && ownerCivName != "Unknown")
+            return ownerCivName + " City";
+
+        return "City";
+    }
+
+    public void EnsureDisplayName(Program1 manager = null)
+    {
+        if (!string.IsNullOrEmpty(cityName) && cityName != "City")
+            return;
+
+        if (manager == null)
+            manager = Object.FindAnyObjectByType<Program1>();
+
+        string civ = ownerCivName;
+        if (string.IsNullOrEmpty(civ) || civ == "Unknown")
+            civ = isPlayerCity && manager != null
+                ? manager.currentCivName
+                : PlayerPrefs.GetString("SelectedCiv", "Rome");
+
+        ownerCivName = civ;
+        cityName = CityLabel.GenerateCityName(civ, isCapital);
+        gameObject.name = civ + "_" + cityName;
+    }
     
     void Start()
     {

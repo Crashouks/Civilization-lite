@@ -37,6 +37,8 @@ public class CombatSystem : MonoBehaviour
     
     private Dictionary<string, UnitStats> unitStats = new Dictionary<string, UnitStats>();
     
+    private Program1 mapManager;
+
     void Awake()
     {
         if (instance == null)
@@ -101,46 +103,45 @@ public class CombatSystem : MonoBehaviour
             Debug.LogWarning("Атака неможлива!");
             yield break;
         }
-        
+
         UnitStats attackerStats = GetUnitStats(attacker);
         UnitStats defenderStats = GetUnitStats(defender);
-        
+        int damage = CalculateDamage(attackerStats, defenderStats);
+
         Debug.Log($"{attacker.name} атакує {defender.name}!");
 
         UnitAnimator attackerAnim = attacker.GetComponent<UnitAnimator>();
         Program1 map = Object.FindAnyObjectByType<Program1>();
+        bool defenderDestroyed = false;
+
         if (attackerAnim != null && map != null && map.tilemap != null)
         {
             Vector3 defenderPos = map.tilemap.GetCellCenterWorld(defender.gridPosition);
             defenderPos.y -= 1f;
             attackerAnim.FaceToward(defenderPos - attacker.transform.position);
-            yield return StartCoroutine(attackerAnim.PlayAttackRoutine(defender, CalculateDamage(attackerStats, defenderStats)));
-        
-        CacheMapManager();
-        if (combatEffectPrefab != null && mapManager != null && mapManager.tilemap != null)
-        {
-            GameObject effect = Instantiate(combatEffectPrefab,
-                mapManager.tilemap.GetCellCenterWorld(defender.gridPosition),
-                Quaternion.identity);
-            Destroy(effect, combatAnimationDuration);
+            defender.lastAttacker = attacker;
+            yield return StartCoroutine(attackerAnim.PlayAttackRoutine(defender, damage));
+            defenderDestroyed = defender == null;
         }
         else
         {
-            int damage = CalculateDamage(attackerStats, defenderStats);
-            bool defenderDestroyed = ApplyDamage(defender, damage);
-            if (defenderDestroyed)
-                OnUnitDestroyed(attacker, defender);
+            CacheMapManager();
+            if (combatEffectPrefab != null && mapManager != null && mapManager.tilemap != null)
+            {
+                GameObject effect = Instantiate(combatEffectPrefab,
+                    mapManager.tilemap.GetCellCenterWorld(defender.gridPosition),
+                    Quaternion.identity);
+                Destroy(effect, combatAnimationDuration);
+            }
+
+            yield return new WaitForSeconds(combatAnimationDuration);
+            defenderDestroyed = ApplyDamage(defender, damage, attacker);
         }
 
         attacker.currentMovement = 0;
 
-        if (combatEffectPrefab != null && map != null && map.tilemap != null)
-        {
-            GameObject effect = Instantiate(combatEffectPrefab,
-                map.tilemap.GetCellCenterWorld(defender.gridPosition),
-                Quaternion.identity);
-            Destroy(effect, combatAnimationDuration);
-        }
+        if (defenderDestroyed && defender != null)
+            OnUnitDestroyed(attacker, defender);
 
         CheckCombatEnd(attacker, defender);
     }
@@ -163,27 +164,24 @@ public class CombatSystem : MonoBehaviour
         return finalDamage;
     }
     
-    bool ApplyDamage(Unit unit, int damage)
+    bool ApplyDamage(Unit unit, int damage, Unit attacker)
     {
-        // Якщо у юніта немає UnitHealth, використовуємо базове HP в Unit
-        // (щоб не було one-shot з одного удару).
         if (unit.GetComponent<UnitHealth>() == null)
         {
             int hpBefore = unit.health;
-            unit.TakeDamage(damage);
-            bool destroyed = unit == null || hpBefore - damage <= 0;
-            return destroyed;
+            unit.TakeDamage(damage, attacker);
+            return unit == null || hpBefore - damage <= 0;
         }
-        
+
         UnitHealth health = unit.GetComponent<UnitHealth>();
         health.TakeDamage(damage);
-        
+
         if (health.currentHealth <= 0)
         {
             Debug.Log($"{unit.name} знищено!");
             return true;
         }
-        
+
         Debug.Log($"{unit.name} отримав {damage} пошкоджень, залишилось {health.currentHealth} здоров'я");
         return false;
     }
@@ -334,6 +332,4 @@ public class CombatSystem : MonoBehaviour
         
         return info;
     }
-    
-    private Program1 mapManager;
 }

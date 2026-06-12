@@ -233,24 +233,47 @@ public class Unit : MonoBehaviour
         if (target == null || manager == null || manager.tilemap == null)
             yield break;
 
-        UnitAnimator anim = GetComponent<UnitAnimator>();
-        Vector3 targetPos = manager.tilemap.GetCellCenterWorld(target.gridPosition);
-        targetPos.y -= 1f;
+        Vector3 startPos = transform.position;
+        Vector3 targetCellPos = manager.tilemap.GetCellCenterWorld(target.gridPosition);
+        targetCellPos.y -= 1f;
+        targetCellPos.z = -0.1f;
 
+        UnitAnimator anim = GetComponent<UnitAnimator>();
         if (anim != null)
         {
-            anim.FaceToward(targetPos - transform.position);
+            anim.FaceToward(targetCellPos - transform.position);
+            target.lastAttacker = this;
             yield return StartCoroutine(anim.PlayAttackRoutine(target, attackPower));
+            yield break;
         }
-        else
+
+        Vector3 attackPos = Vector3.Lerp(startPos, targetCellPos, 0.6f);
+        float forwardDuration = 0.12f;
+        float backDuration = 0.10f;
+        float jumpHeight = 0.22f;
+
+        for (float t = 0f; t < forwardDuration; t += Time.deltaTime)
+        {
+            float k = t / forwardDuration;
+            Vector3 p = Vector3.Lerp(startPos, attackPos, k);
+            p.y += Mathf.Sin(k * Mathf.PI) * jumpHeight;
+            transform.position = p;
+            yield return null;
+        }
 
         transform.position = attackPos;
         target.TakeDamage(attackPower, this);
 
         for (float t = 0f; t < backDuration; t += Time.deltaTime)
         {
-            target.TakeDamage(attackPower);
+            float k = t / backDuration;
+            Vector3 p = Vector3.Lerp(attackPos, startPos, k);
+            p.y += Mathf.Sin((1f - k) * Mathf.PI) * jumpHeight * 0.5f;
+            transform.position = p;
+            yield return null;
         }
+
+        transform.position = startPos;
     }
 
     public IEnumerator MoveAlongPath(List<Vector3Int> path, Tilemap tilemap, Program1 manager)

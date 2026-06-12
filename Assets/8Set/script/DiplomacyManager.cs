@@ -46,7 +46,13 @@ public class DiplomacyManager : MonoBehaviour
     
     IEnumerator SpawnAICivilizations()
     {
-        yield return new WaitForSeconds(2f);
+        Program1 manager = null;
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            yield return new WaitForSeconds(0.25f);
+            manager = Object.FindAnyObjectByType<Program1>();
+            if (manager != null) break;
+        }
 
         if (SaveManager.LoadedFromSaveThisSession)
         {
@@ -54,7 +60,6 @@ public class DiplomacyManager : MonoBehaviour
             yield break;
         }
 
-        Program1 manager = Object.FindAnyObjectByType<Program1>();
         if (manager == null)
         {
             Debug.LogError("Program1 не знайдено для спавну AI!");

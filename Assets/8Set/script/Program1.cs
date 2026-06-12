@@ -78,12 +78,17 @@ public class Program1 : MonoBehaviour
     [Header("Налаштування Сітки")]
     public Grid grid;
     public Tilemap tilemap;
-    public float cellWidth = 1.0f;
-    public float cellHeight = 0.866f;
+    [Tooltip("Додатковий масштаб гексів у світі")]
+    public float hexWorldScale = 1.5f;
+    public float cellWidth = 2.56f;
+    public float cellHeight = 2.56f;
+
+    // Значення з Hex World Tiles - Free (PPU 100 → 256px = 2.56 од.)
+    const float PackCellSize = 2.56f;
 
     [Header("Параметри Карти")]
-    public int width = 40;
-    public int height = 30;
+    public int width = 50;
+    public int height = 40;
     public float scale = 10f;
     public float seed;
 
@@ -110,17 +115,36 @@ public class Program1 : MonoBehaviour
     [Header("Візуалізація Шляху")]
     public LineRenderer pathRenderer;
 
+    [Header("Міста")]
+    public GameObject cityPrefab;
+
+    [Header("Інтерфейс")]
+    public GameObject warButton;
+    public GameObject settleButton;
+    public GameObject nextTurnButton;
+
     public Unit selectedUnit;
     public City selectedCityForWar;
     public string pendingWarTargetCiv = "";
     public List<Unit> allUnits = new List<Unit>();
+    public List<City> allCities = new List<City>();
     private bool isMoving = false;
     private bool suppressNextMapClick = false;
 
     void Start()
     {
-        if (grid == null) grid = GetComponentInParent<Grid>();
+        GameSettings.ApplySavedSettings();
+
+        if (grid == null) grid = GetComponent<Grid>();
+        if (grid == null) grid = FindAnyObjectByType<Grid>();
         if (tilemap == null) tilemap = GetComponentInChildren<Tilemap>();
+
+        if (grid == null || tilemap == null)
+        {
+            Debug.LogError("Program1: Grid or Tilemap not found. Hex map cannot be generated.");
+            return;
+        }
+
         if (pathRenderer != null) pathRenderer.enabled = false;
 
         EnsureScoutPrefab();
@@ -159,6 +183,8 @@ public class Program1 : MonoBehaviour
             new GameObject("EconomyManager").AddComponent<EconomyManager>();
         if (SaveManager.Instance == null)
             new GameObject("SaveManager").AddComponent<SaveManager>();
+        if (Object.FindAnyObjectByType<DiplomacyManager>() == null)
+            new GameObject("DiplomacyManager").AddComponent<DiplomacyManager>();
         if (FogOfWarManager.Instance == null)
             new GameObject("FogOfWarManager").AddComponent<FogOfWarManager>();
     }
@@ -230,9 +256,63 @@ public class Program1 : MonoBehaviour
 
     void ConfigureGrid()
     {
+        ResolveHexCellSize();
+
         grid.cellLayout = GridLayout.CellLayout.Hexagon;
-        grid.cellSize = new Vector3(cellWidth, cellHeight, 0);
-        tilemap.tileAnchor = new Vector3(0f, 0f, 0);
+        grid.cellSwizzle = GridLayout.CellSwizzle.XYZ;
+        grid.cellSize = new Vector3(cellWidth, cellHeight, 0f);
+        grid.cellGap = Vector3.zero;
+        grid.transform.localScale = Vector3.one * hexWorldScale;
+
+        tilemap.tileAnchor = new Vector3(0f, -2f / 3f, 0f);
+        tilemap.orientation = Tilemap.Orientation.XY;
+
+        TilemapRenderer renderer = tilemap.GetComponent<TilemapRenderer>();
+        if (renderer != null)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
+            if (shader == null) shader = Shader.Find("Sprites/Default");
+            if (shader != null)
+                renderer.material = new Material(shader);
+        }
+    }
+
+    void ResolveHexCellSize()
+    {
+        Tile refTile = grassTile != null ? grassTile : waterTile;
+        if (refTile != null && refTile.sprite != null)
+            cellWidth = refTile.sprite.bounds.size.x;
+        else
+            cellWidth = PackCellSize;
+
+        cellHeight = cellWidth;
+    }
+
+    void FillHexMap()
+    {
+        if (tilemap == null) return;
+
+        tilemap.ClearAllTiles();
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                float xOffset = (y & 1) == 1 ? 0.5f : 0f;
+                float xCoord = ((float)x + xOffset) / width * scale + seed;
+                float yCoord = (float)y / height * scale + seed;
+                float h = Mathf.PerlinNoise(xCoord, yCoord);
+                float m = Mathf.PerlinNoise(xCoord + 2000f, yCoord + 2000f);
+                float dist = Mathf.Abs(y - (height / 2f)) / (height / 2f);
+                float t = Mathf.Clamp01(1f - dist + (Mathf.PerlinNoise(xCoord * 0.5f, yCoord * 0.5f) - 0.5f) * 0.2f);
+                Tile tile = GetAdvancedBiome(h, m, t);
+                if (tile != null)
+                    tilemap.SetTile(new Vector3Int(x, y, 0), tile);
+            }
+        }
+
+        tilemap.RefreshAllTiles();
+        tilemap.CompressBounds();
     }
 
     private void HandleMouseClick()
@@ -335,22 +415,20 @@ public class Program1 : MonoBehaviour
     {
         if (city == null) return;
 
-        // Якщо клік по власному місті - показуємо інформацію але без кнопок війни
-        if (city.isPlayerCity)
-        {
-            ShowCityInfoPanel(city);
-        // Якщо клік по власному місту - показуємо панель найму юнітів.
         if (city.isPlayerCity)
         {
             pendingWarTargetCiv = "";
             HideWarButton();
+            ShowCityInfoPanel(city);
             if (GameUI.Instance != null)
                 GameUI.Instance.ShowSpawnPanel(city);
             return;
         }
 
-        // Для ворожих міст показуємо панель з кнопками
         ShowCityInfoPanel(city);
+        selectedCityForWar = city;
+        pendingWarTargetCiv = ResolveWarTargetCiv(city);
+        ShowWarButton();
     }
 
     void ShowCityInfoPanel(City city)
@@ -488,34 +566,13 @@ public class Program1 : MonoBehaviour
 
     IEnumerator GenerateMapRoutine()
     {
-        tilemap.ClearAllTiles();
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                float xOffset = (y % 2 != 0) ? 0.5f : 0f;
-                float xCoord = ((float)x + xOffset) / width * scale + seed;
-                float yCoord = (float)y / height * scale + seed;
-                float h = Mathf.PerlinNoise(xCoord, yCoord);
-                float m = Mathf.PerlinNoise(xCoord + 2000f, yCoord + 2000f);
-                float dist = Mathf.Abs(y - (height / 2f)) / (height / 2f);
-                float t = Mathf.Clamp01(1f - dist + (Mathf.PerlinNoise(xCoord * 0.5f, yCoord * 0.5f) - 0.5f) * 0.2f);
-                tilemap.SetTile(new Vector3Int(x, y, 0), GetAdvancedBiome(h, m, t));
-            }
-        }
-        yield return new WaitForEndOfFrame();
+        FillHexMap();
+        yield return null;
 
-        fogOfWar = GetComponent<FogOfWarManager>() ?? gameObject.AddComponent<FogOfWarManager>();
-        fogOfWar.Initialize(this);
+        if (FogOfWarManager.Instance != null)
+            FogOfWarManager.Instance.Initialize(this);
 
         SpawnStartingUnits();
-        InitializeFogOfWar();
-    }
-
-    void InitializeFogOfWar()
-    {
-        if (FogOfWarManager.Instance == null) return;
-        FogOfWarManager.Instance.Initialize(this);
     }
 
     public void ClearAllGameObjects()
@@ -538,22 +595,8 @@ public class Program1 : MonoBehaviour
 
     public IEnumerator RegenerateAndRestore(GameSaveData data)
     {
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                float xOffset = (y % 2 != 0) ? 0.5f : 0f;
-                float xCoord = ((float)x + xOffset) / width * scale + seed;
-                float yCoord = (float)y / height * scale + seed;
-                float h = Mathf.PerlinNoise(xCoord, yCoord);
-                float m = Mathf.PerlinNoise(xCoord + 2000f, yCoord + 2000f);
-                float dist = Mathf.Abs(y - (height / 2f)) / (height / 2f);
-                float t = Mathf.Clamp01(1f - dist + (Mathf.PerlinNoise(xCoord * 0.5f, yCoord * 0.5f) - 0.5f) * 0.2f);
-                tilemap.SetTile(new Vector3Int(x, y, 0), GetAdvancedBiome(h, m, t));
-            }
-        }
-
-        yield return new WaitForEndOfFrame();
+        FillHexMap();
+        yield return null;
 
         foreach (CitySaveData cityData in data.cities)
         {
@@ -586,18 +629,25 @@ public class Program1 : MonoBehaviour
         else currentCivColor = Color.gray;
     }
 
+    void InitializeFogOfWar()
+    {
+        if (FogOfWarManager.Instance == null) return;
+        FogOfWarManager.Instance.Initialize(this);
+    }
+
     void SpawnCityFromSave(Vector3Int pos, bool isPlayerCity, string ownerCiv, string cityName)
     {
         if (cityPrefab == null) return;
 
         Vector3 worldPos = tilemap.GetCellCenterWorld(pos);
         GameObject cityObj = Instantiate(cityPrefab, new Vector3(worldPos.x, worldPos.y - 1f, -0.1f), Quaternion.identity);
-        cityObj.name = string.IsNullOrEmpty(cityName) ? ownerCiv + "_City" : cityName;
 
         City city = cityObj.GetComponent<City>() ?? cityObj.AddComponent<City>();
         city.gridPosition = pos;
         city.isPlayerCity = isPlayerCity;
         city.ownerCivName = ownerCiv;
+        city.cityName = string.IsNullOrEmpty(cityName) ? ownerCiv + " City" : cityName;
+        cityObj.name = ownerCiv + "_" + city.cityName;
         RegisterCity(city);
     }
 
@@ -689,10 +739,14 @@ public class Program1 : MonoBehaviour
         }
 
         Vector3 camPos = tilemap.GetCellCenterWorld(settlerPos);
-        Camera.main.transform.position = new Vector3(camPos.x, camPos.y, -10f);
+        if (Camera.main != null)
+        {
+            Camera.main.transform.position = new Vector3(camPos.x, camPos.y, -10f);
+            Camera.main.orthographicSize = cellHeight * hexWorldScale * 2.5f;
+        }
 
-        if (fogOfWar != null)
-            fogOfWar.RevealAllPlayerUnits();
+        if (FogOfWarManager.Instance != null)
+            FogOfWarManager.Instance.RevealAllPlayerUnits();
     }
 
     public int CountPlayerUnitsOfKind(UnitTypeHelper.UnitKind kind)
@@ -825,7 +879,8 @@ public class Program1 : MonoBehaviour
     public void EndTurn()
     {
         foreach (Unit u in allUnits) u.ResetMovement();
-        if (fogOfWar != null) fogOfWar.RevealAllPlayerUnits();
+        if (FogOfWarManager.Instance != null)
+            FogOfWarManager.Instance.RevealAllPlayerUnits();
     }
     void ApplyUnitStats(Unit unit, string unitName)
     {
@@ -851,23 +906,7 @@ public class Program1 : MonoBehaviour
         unit.currentMovement = unit.maxMovement;
     }
 
-    public void EndTurn() { foreach (Unit u in allUnits) u.ResetMovement(); }
-
-    // ================= ГОРОДА =================
-
-    [Header("Міста")]
-    public GameObject cityPrefab;
-
-    [Header("Інтерфейс")]
-    public GameObject warButton; // Пряме посилання на кнопку війни
-    public GameObject settleButton; // Кнопка заснування міста
-    public GameObject nextTurnButton; // Кнопка наступного ходу
-
-    public List<City> allCities = new List<City>();
-
-    FogOfWarManager fogOfWar;
-
-    public FogOfWarManager GetFogOfWar() => fogOfWar;
+    public FogOfWarManager GetFogOfWar() => FogOfWarManager.Instance;
 
     public bool HasCityAt(Vector3Int cell)
     {
@@ -883,6 +922,7 @@ public class Program1 : MonoBehaviour
     {
         if (!allCities.Contains(city))
         {
+            city.EnsureDisplayName(this);
             allCities.Add(city);
             Colorize(city.gameObject);
 

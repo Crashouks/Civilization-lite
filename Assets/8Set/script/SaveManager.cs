@@ -9,7 +9,7 @@ public class SaveManager : MonoBehaviour
     public const string SaveFileName = "civilization_save.json";
     public const string LoadOnStartKey = "LoadSaveGame";
 
-    public static bool IsRestoringSave { get; private set; }
+    public static bool IsRestoringSave { get; set; }
     public static bool LoadedFromSaveThisSession { get; set; }
 
     public static string SavePath => Path.Combine(Application.persistentDataPath, SaveFileName);
@@ -27,6 +27,35 @@ public class SaveManager : MonoBehaviour
     public static bool HasSave()
     {
         return File.Exists(SavePath);
+    }
+
+    public static bool TryReadSave(out GameSaveData data)
+    {
+        data = null;
+        if (!HasSave()) return false;
+
+        try
+        {
+            string json = File.ReadAllText(SavePath);
+            data = JsonUtility.FromJson<GameSaveData>(json);
+            return data != null;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("Не вдалося прочитати збереження: " + e.Message);
+            return false;
+        }
+    }
+
+    public static void PrepareLoadFromSave()
+    {
+        if (!TryReadSave(out GameSaveData data)) return;
+
+        if (!string.IsNullOrEmpty(data.playerCiv))
+            PlayerPrefs.SetString("SelectedCiv", data.playerCiv);
+
+        PlayerPrefs.SetInt(LoadOnStartKey, 1);
+        PlayerPrefs.Save();
     }
 
     public void SaveGame()
@@ -84,26 +113,35 @@ public class SaveManager : MonoBehaviour
                 y = city.gridPosition.y,
                 isPlayerCity = city.isPlayerCity,
                 ownerCivName = city.ownerCivName,
-                cityName = city.name
+                cityName = city.cityName
             });
         }
 
         string json = JsonUtility.ToJson(data, true);
         File.WriteAllText(SavePath, json);
-        Debug.Log("Гру збережено: " + SavePath);
+        Debug.Log("Game saved to JSON: " + SavePath);
     }
 
     public void LoadGame()
     {
-        if (!HasSave())
+        if (!PrepareLoadAndValidate()) return;
+        UnityEngine.SceneManagement.SceneManager.LoadScene("Gamescena");
+    }
+
+    bool PrepareLoadAndValidate()
+    {
+        if (!TryReadSave(out GameSaveData data))
         {
             Debug.LogWarning("Файл збереження не знайдено");
-            return;
+            return false;
         }
+
+        if (!string.IsNullOrEmpty(data.playerCiv))
+            PlayerPrefs.SetString("SelectedCiv", data.playerCiv);
 
         PlayerPrefs.SetInt(LoadOnStartKey, 1);
         PlayerPrefs.Save();
-        UnityEngine.SceneManagement.SceneManager.LoadScene("Gamescena");
+        return true;
     }
 
     public void ApplyLoadedGame(Program1 manager)
@@ -145,6 +183,8 @@ public class SaveManager : MonoBehaviour
         }
 
         manager.ApplyCivFromName(data.playerCiv);
+        PlayerPrefs.SetString("SelectedCiv", data.playerCiv ?? "Rome");
+        PlayerPrefs.Save();
         manager.ClearAllGameObjects();
         manager.StartCoroutine(manager.RegenerateAndRestore(data));
     }

@@ -728,7 +728,7 @@ Grid:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 619826731}
   m_Enabled: 1
-  m_CellSize: {x: 1, y: 0.866, z: 0}
+  m_CellSize: {x: 2.56, y: 2.56, z: 0}
   m_CellGap: {x: 0, y: 0, z: 0}
   m_CellLayout: 1
   m_CellSwizzle: 0
@@ -742,7 +742,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 3, y: 3, z: 1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1297100739}
@@ -769,8 +769,9 @@ MonoBehaviour:
   isAtWar: 0
   grid: {fileID: 619826733}
   tilemap: {fileID: 1297100737}
-  cellWidth: 1
-  cellHeight: 1
+  cellWidth: 2.56
+  cellHeight: 2.56
+  hexWorldScale: 1.5
   width: 80
   height: 50
   scale: 12
@@ -1379,7 +1380,7 @@ Tilemap:
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Origin: {x: 0, y: 0, z: 0}
   m_Size: {x: 0, y: 0, z: 1}
-  m_TileAnchor: {x: 0.5, y: 0.5, z: 0}
+  m_TileAnchor: {x: 0, y: -0.6666667, z: 0}
   m_TileOrientation: 0
   m_TileOrientationMatrix:
     e00: 1
