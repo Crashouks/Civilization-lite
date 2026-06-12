@@ -60,15 +60,9 @@ public class UnitAI : MonoBehaviour
     AISituation AnalyzeSituation()
     {
         AISituation situation = new AISituation();
-        
-        // Перевіряємо, чи війна
-        bool isAtWar = civilizationAI != null ? civilizationAI.isAtWar : false;
-        DiplomacyManager diplomacy = DiplomacyManager.Instance;
-        if (!selfUnit.isPlayer && diplomacy != null && diplomacy.isAtWar)
-        {
-            // Стара поведінка: у війні всі AI переходять у бойовий режим.
-            isAtWar = true;
-        }
+
+        // Перевіряємо, чи ця конкретна цивілізація воює з гравцем
+        bool isAtWar = CheckIfAtWarWithPlayer();
         
         // Знаходимо ворогів поруч
         List<Unit> nearbyEnemies = FindNearbyEnemies(5);
@@ -517,6 +511,21 @@ public class UnitAI : MonoBehaviour
             // Викликаємо метод з CivilizationAI для створення міста
             civilizationAI.CreateAICity(selfUnit);
         }
+    }
+
+    bool CheckIfAtWarWithPlayer()
+    {
+        if (civilizationAI == null) return false;
+
+        DiplomacyManager diplomacy = Object.FindAnyObjectByType<DiplomacyManager>();
+        if (diplomacy != null)
+        {
+            Program1 playerManager = Object.FindAnyObjectByType<Program1>();
+            string playerName = playerManager != null ? playerManager.currentCivName : "Player";
+            return diplomacy.IsAtWar(civilizationAI.civilizationName, playerName);
+        }
+
+        return civilizationAI.isAtWar;
     }
 }
 

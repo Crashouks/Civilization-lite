@@ -791,6 +791,7 @@ MonoBehaviour:
   maxWarriors: 20
   pathRenderer: {fileID: 619826736}
   selectedUnit: {fileID: 0}
+  pendingWarTargetCiv: 
   allUnits: []
   cityPrefab: {fileID: 2015113699}
   warButton: {fileID: 0}

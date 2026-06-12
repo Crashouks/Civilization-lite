@@ -5,6 +5,8 @@ using UnityEngine.SceneManagement;
 using UnityEngine.EventSystems;
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
+using UnityEngine.UI;
 
 public class Program1 : MonoBehaviour
 {
@@ -36,25 +38,41 @@ public class Program1 : MonoBehaviour
         Debug.Log("Гра почалася за: " + currentCivName);
     }
 
+    public Color GetCivColor(string civName)
+    {
+        if (civName == "Rome") return romeColor;
+        if (civName == "America") return americaColor;
+        if (civName == "Egypt") return egyptColor;
+        if (civName == "Scythia") return scythiaColor;
+        return Color.gray;
+    }
+
     public void Colorize(GameObject obj)
     {
-        // ПЕРЕВІРКА: чи є цей об'єкт юнітом?
-        // Ми перевіряємо, чи має об'єкт компонент "Unit"
-        if (obj.GetComponent<Unit>() == null)
+        if (obj.GetComponent<Unit>() == null) return;
+
+        foreach (SpriteRenderer sr in obj.GetComponentsInChildren<SpriteRenderer>())
         {
-            // Якщо це не юніт (наприклад, місто), ми виходимо з функції і нічого не фарбуємо
-            return;
+            if (sr == null) continue;
+
+            // Фарбуємо тільки одяг (body, clothes, armor, tunic, cape, etc.)
+            string lowerName = sr.name.ToLower();
+            bool isClothing = lowerName.Contains("body") || lowerName.Contains("clothes") ||
+                            lowerName.Contains("armor") || lowerName.Contains("tunic") ||
+                            lowerName.Contains("cape") || lowerName.Contains("robe") ||
+                            lowerName.Contains("cloth") || lowerName.Contains("outfit");
+
+            if (isClothing)
+            {
+                sr.material = new Material(Shader.Find("Sprites/Default"));
+                sr.color = currentCivColor;
+                sr.material.SetColor("_Color", currentCivColor);
+                sr.material.EnableKeyword("_EMISSION");
+                sr.material.SetColor("_EmissionColor", currentCivColor * 0.5f);
+            }
         }
 
-        SpriteRenderer sr = obj.GetComponentInChildren<SpriteRenderer>();
-        if (sr != null)
-        {
-            sr.material = new Material(Shader.Find("Sprites/Default"));
-            sr.color = currentCivColor;
-            sr.material.SetColor("_Color", currentCivColor);
-            sr.material.EnableKeyword("_EMISSION");
-            sr.material.SetColor("_EmissionColor", currentCivColor * 0.5f);
-        }
+        UnitSetup.ApplySorting(obj.transform);
     }
 
     [Header("Налаштування Сітки")]
@@ -64,8 +82,8 @@ public class Program1 : MonoBehaviour
     public float cellHeight = 0.866f;
 
     [Header("Параметри Карти")]
-    public int width = 80;
-    public int height = 50;
+    public int width = 40;
+    public int height = 30;
     public float scale = 10f;
     public float seed;
 
@@ -93,7 +111,7 @@ public class Program1 : MonoBehaviour
     public LineRenderer pathRenderer;
 
     public Unit selectedUnit;
-    private City selectedCityForWar;
+    public City selectedCityForWar;
     public string pendingWarTargetCiv = "";
     public List<Unit> allUnits = new List<Unit>();
     private bool isMoving = false;
@@ -167,6 +185,11 @@ public class Program1 : MonoBehaviour
         if (settleButton == null)
         {
             settleButton = FindObjectByNameInScene("SettleButton");
+        }
+
+        if (nextTurnButton == null)
+        {
+            nextTurnButton = FindObjectByNameInScene("NextTurnButton");
         }
     }
 
@@ -252,6 +275,13 @@ public class Program1 : MonoBehaviour
         Vector3Int clickedCell = tilemap.WorldToCell(worldPoint);
         clickedCell.z = 0;
 
+        // Ховаємо панель інформації про місто при кліку на порожній тайл
+        CityInfoPanel panel = Object.FindAnyObjectByType<CityInfoPanel>();
+        if (panel != null)
+        {
+            panel.HidePanel();
+        }
+
         if (selectedUnit != null && tilemap.HasTile(clickedCell))
         {
             if (FogOfWarManager.Instance != null && !FogOfWarManager.Instance.IsVisible(clickedCell))
@@ -305,6 +335,10 @@ public class Program1 : MonoBehaviour
     {
         if (city == null) return;
 
+        // Якщо клік по власному місті - показуємо інформацію але без кнопок війни
+        if (city.isPlayerCity)
+        {
+            ShowCityInfoPanel(city);
         // Якщо клік по власному місту - показуємо панель найму юнітів.
         if (city.isPlayerCity)
         {
@@ -315,9 +349,32 @@ public class Program1 : MonoBehaviour
             return;
         }
 
-        selectedCityForWar = city;
-        pendingWarTargetCiv = ResolveWarTargetCiv(city);
-        ShowWarButton();
+        // Для ворожих міст показуємо панель з кнопками
+        ShowCityInfoPanel(city);
+    }
+
+    void ShowCityInfoPanel(City city)
+    {
+        Debug.Log("ShowCityInfoPanel викликано для міста: " + city.cityName);
+
+        CityInfoPanel panel = Object.FindAnyObjectByType<CityInfoPanel>();
+        if (panel == null)
+        {
+            Debug.Log("CityInfoPanel не знайдено, створюємо новий");
+            // Якщо панель не існує, створюємо її
+            GameObject panelObj = new GameObject("CityInfoPanel");
+            panel = panelObj.AddComponent<CityInfoPanel>();
+        }
+
+        if (panel != null)
+        {
+            Debug.Log("Викликаємо panel.ShowPanel для " + city.cityName);
+            panel.ShowPanel(city);
+        }
+        else
+        {
+            Debug.LogError("Не вдалося створити CityInfoPanel!");
+        }
     }
 
     string ResolveWarTargetCiv(City city)
@@ -409,7 +466,13 @@ public class Program1 : MonoBehaviour
 
     IEnumerator ExecutePathMovement(Unit unit, List<Vector3Int> path)
     {
-        isMoving = true; ClearPath();
+        isMoving = true;
+        ClearPath();
+
+        UnitAnimator anim = unit.GetComponent<UnitAnimator>();
+        if (path.Count > 0 && anim != null)
+            anim.PlayWalk();
+
         yield return StartCoroutine(unit.MoveAlongPath(path, tilemap, this));
         if (unit.currentMovement <= 0) 
         {
@@ -441,6 +504,10 @@ public class Program1 : MonoBehaviour
             }
         }
         yield return new WaitForEndOfFrame();
+
+        fogOfWar = GetComponent<FogOfWarManager>() ?? gameObject.AddComponent<FogOfWarManager>();
+        fogOfWar.Initialize(this);
+
         SpawnStartingUnits();
         InitializeFogOfWar();
     }
@@ -623,6 +690,9 @@ public class Program1 : MonoBehaviour
 
         Vector3 camPos = tilemap.GetCellCenterWorld(settlerPos);
         Camera.main.transform.position = new Vector3(camPos.x, camPos.y, -10f);
+
+        if (fogOfWar != null)
+            fogOfWar.RevealAllPlayerUnits();
     }
 
     public int CountPlayerUnitsOfKind(UnitTypeHelper.UnitKind kind)
@@ -726,8 +796,8 @@ public class Program1 : MonoBehaviour
         }
         Vector3 worldPos = tilemap.GetCellCenterWorld(cellPos);
         GameObject obj = Instantiate(prefab, new Vector3(worldPos.x, worldPos.y - 1f, -0.1f), Quaternion.identity);
-        obj.name = name;
-        Unit u = obj.GetComponent<Unit>() ?? obj.AddComponent<Unit>();
+        UnitSetup.Configure(obj, name, isPlayerUnit);
+        Unit u = obj.GetComponent<Unit>();
         u.gridPosition = cellPos;
         u.isPlayer = isPlayerUnit;
         ApplyUnitStats(u, name);
@@ -736,28 +806,27 @@ public class Program1 : MonoBehaviour
         if (isPlayerUnit && FogOfWarManager.Instance != null)
             FogOfWarManager.Instance.RevealAround(cellPos, FogOfWarManager.Instance.defaultSightRange);
         
-        // Додаємо колайдер якщо його немає
         if (obj.GetComponent<Collider2D>() == null)
         {
             BoxCollider2D collider = obj.AddComponent<BoxCollider2D>();
             collider.isTrigger = true;
             
-            // Налаштовуємо розмір колайдера
             SpriteRenderer sr = obj.GetComponentInChildren<SpriteRenderer>();
             if (sr != null)
-            {
                 collider.size = sr.sprite.bounds.size;
-            }
             else
-            {
                 collider.size = new Vector2(1f, 1f);
-            }
         }
 
         Colorize(obj);
         return u;
     }
 
+    public void EndTurn()
+    {
+        foreach (Unit u in allUnits) u.ResetMovement();
+        if (fogOfWar != null) fogOfWar.RevealAllPlayerUnits();
+    }
     void ApplyUnitStats(Unit unit, string unitName)
     {
         UnitTypeHelper.UnitKind kind = UnitTypeHelper.GetKind(unitName);
@@ -792,8 +861,13 @@ public class Program1 : MonoBehaviour
     [Header("Інтерфейс")]
     public GameObject warButton; // Пряме посилання на кнопку війни
     public GameObject settleButton; // Кнопка заснування міста
+    public GameObject nextTurnButton; // Кнопка наступного ходу
 
     public List<City> allCities = new List<City>();
+
+    FogOfWarManager fogOfWar;
+
+    public FogOfWarManager GetFogOfWar() => fogOfWar;
 
     public bool HasCityAt(Vector3Int cell)
     {
@@ -855,11 +929,73 @@ public class Program1 : MonoBehaviour
         }
     }
 
+    // Метод для наступного ходу
+    public void NextTurn()
+    {
+        Debug.Log("=== НАСТУПНИЙ ХІД ===");
+
+        // Скидаємо рух для всіх юнітів (гравця і AI)
+        int unitsReset = 0;
+        foreach (Unit unit in allUnits)
+        {
+            if (unit != null)
+            {
+                unit.currentMovement = 3; // Всі юніти отримують 3 ходи
+                unitsReset++;
+            }
+        }
+        Debug.Log($"Скинуто рух для {unitsReset} юнітів (по 3 ходи кожен)");
+
+        // Виконуємо хід для всіх AI цивілізацій послідовно
+        CivilizationAI[] aiCivs = Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None);
+        Debug.Log($"Знайдено {aiCivs.Length} AI цивілізацій");
+
+        if (aiCivs.Length == 0)
+        {
+            Debug.LogWarning("AI цивілізації не знайдено! Перевірте чи існують об'єкти CivilizationAI на сцені.");
+        }
+
+        // Запускаємо послідовні ходи AI
+        StartCoroutine(ExecuteAITurnsSequentially(aiCivs));
+
+        // Скидаємо вибір юніта
+        DeselectUnit();
+        ClearPath();
+    }
+
+    IEnumerator ExecuteAITurnsSequentially(CivilizationAI[] aiCivs)
+    {
+        foreach (CivilizationAI ai in aiCivs)
+        {
+            if (ai != null && ai.civilizationName != "AI Civilization")
+            {
+                Debug.Log($"Запускаємо хід для {ai.civilizationName}");
+                ai.ExecuteAITurn();
+
+                // Чекаємо поки цивілізація завершить свій хід
+                while (ai.IsProcessingTurn())
+                {
+                    yield return null;
+                }
+
+                Debug.Log($"{ai.civilizationName} завершив хід");
+            }
+            else if (ai != null && ai.civilizationName == "AI Civilization")
+            {
+                Debug.LogWarning($"Пропускаємо CivilizationAI з назвою за замовчуванням: {ai.gameObject.name}");
+            }
+        }
+
+        Debug.Log("=== ВСІ AI ЦИВІЛІЗАЦІЇ ЗАВЕРШИЛИ ХІД ===");
+    }
+
     public void ShowWarButton()
     {
         EnsureUIReferences();
         if (warButton != null)
         {
+            UnityEngine.UI.Button btn = warButton.GetComponent<UnityEngine.UI.Button>();
+            if (btn != null) btn.interactable = true;
             warButton.SetActive(true);
             Debug.Log("Кнопка війни показана");
         }
@@ -871,18 +1007,22 @@ public class Program1 : MonoBehaviour
 
     public void HideWarButton()
     {
+        EnsureUIReferences();
+
         if (warButton != null)
         {
             warButton.SetActive(false);
+            UnityEngine.UI.Button btn = warButton.GetComponent<UnityEngine.UI.Button>();
+            if (btn != null) btn.interactable = false;
         }
 
-        // Додатково ховаємо всі дублікати WarButton у сцені.
-        GameObject[] allObjects = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
-        foreach (GameObject obj in allObjects)
+        UnityEngine.UI.Button[] buttons = Object.FindObjectsByType<UnityEngine.UI.Button>(FindObjectsSortMode.None);
+        foreach (UnityEngine.UI.Button btn in buttons)
         {
-            if (obj != null && obj.name == "WarButton")
+            if (btn != null && btn.gameObject.name == "WarButton")
             {
-                obj.SetActive(false);
+                btn.gameObject.SetActive(false);
+                btn.interactable = false;
             }
         }
     }
@@ -893,10 +1033,14 @@ public class Program1 : MonoBehaviour
         HideWarButton();
     }
 
-    // Признач цей метод на UI кнопку "Оголосити війну"
+    // Для кнопки UI в Inspector
+    public void DeclareWar()
+    {
+        DeclareWarOnSelectedCity();
+    }
+
     public void DeclareWarOnSelectedCity()
     {
-        // Кнопка має зникати одразу після натискання.
         HideWarButton();
         StartCoroutine(HideWarButtonNextFrame());
         suppressNextMapClick = true;
@@ -910,7 +1054,6 @@ public class Program1 : MonoBehaviour
             return;
         }
 
-        // Оголошуємо війну конкретній цивілізації-власнику міста.
         string targetCiv = !string.IsNullOrEmpty(pendingWarTargetCiv) ? pendingWarTargetCiv : ResolveWarTargetCiv(selectedCityForWar);
         if (string.IsNullOrEmpty(targetCiv))
         {
@@ -922,7 +1065,7 @@ public class Program1 : MonoBehaviour
 
         Debug.Log("Оголошення війни проти: " + targetCiv);
         diplomacy.DeclareWar(targetCiv);
-        isAtWar = true;
+        isAtWar = diplomacy.isAtWar;
 
         selectedCityForWar = null;
         pendingWarTargetCiv = "";

@@ -13,7 +13,7 @@ public class Unit : MonoBehaviour
     [Header("Параметри руху")]
     public int maxMovement = 3;
     public int currentMovement;
-    public float moveSpeed = 4f;
+    public float moveSpeed = 9f;
     public Vector3Int gridPosition;
     public bool isSelected;
     [HideInInspector] public Unit lastAttacker;
@@ -59,8 +59,22 @@ public class Unit : MonoBehaviour
 
         health -= damage;
         Debug.Log(name + " отримав шкоду. HP: " + health);
+
+        UnitAnimator anim = GetComponent<UnitAnimator>();
+        if (anim != null && health > 0)
+            anim.PlayHurt();
+
         if (health <= 0)
         {
+            if (anim != null)
+            {
+                anim.PlayDeathAnimation();
+                StartCoroutine(DestroyAfterDeath(anim.GetDeathDuration()));
+            }
+            else
+            {
+                RemoveFromGame();
+            }
             if (EconomyManager.Instance != null && lastAttacker != null)
                 EconomyManager.Instance.AwardKillReward(lastAttacker, this);
 
@@ -68,6 +82,19 @@ public class Unit : MonoBehaviour
             if (manager != null) manager.RemoveUnit(this);
             Destroy(gameObject);
         }
+    }
+
+    IEnumerator DestroyAfterDeath(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        RemoveFromGame();
+    }
+
+    void RemoveFromGame()
+    {
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        if (manager != null) manager.RemoveUnit(this);
+        Destroy(gameObject);
     }
 
     // Метод для заснування міста
@@ -87,21 +114,34 @@ public class Unit : MonoBehaviour
         
         if (manager.cityPrefab != null)
         {
+            string civName = GetCivName(manager);
+            bool isCapital = manager.allCities.Find(c => c != null && c.ownerCivName == civName) == null;
+            string generatedName = CityLabel.GenerateCityName(civName, isCapital);
+
             Vector3 worldPos = manager.tilemap.GetCellCenterWorld(cityPos);
             GameObject cityObj = Instantiate(manager.cityPrefab, new Vector3(worldPos.x, worldPos.y - 1f, -0.1f), Quaternion.identity);
-            cityObj.name = name + "_City";
-            
+            cityObj.name = civName + "_" + generatedName;
+
             City city = cityObj.GetComponent<City>() ?? cityObj.AddComponent<City>();
             city.gridPosition = cityPos;
             city.isPlayerCity = isPlayer;
+            city.ownerCivName = civName;
+            city.isCapital = isCapital;
+            city.cityName = generatedName;
+            city.Init(cityPos, manager.tilemap);
+            city.SetupLabel(civName, manager.GetCivColor(civName));
+
             city.ownerCivName = isPlayer ? manager.currentCivName : GetCivName();
             
             // Встановлюємо власника міста через City компонент
             // City не має isPlayer та civName, тому просто реєструємо місто
             
             manager.RegisterCity(city);
-            
-            Debug.Log(name + " заснував місто на позиції " + cityPos);
+
+            FogOfWarManager fog = manager.GetFogOfWar();
+            if (fog != null) fog.RevealAllPlayerUnits();
+
+            Debug.Log(name + " заснував місто " + generatedName + " (" + civName + ")");
             
             // Знищуємо юніта після заснування міста
             manager.RemoveUnit(this);
@@ -113,15 +153,20 @@ public class Unit : MonoBehaviour
         }
     }
     
-    private string GetCivName()
+    public string GetCivName(Program1 manager = null)
     {
-        if (isPlayer) return "Player";
-        
+        if (isPlayer)
+        {
+            if (manager == null) manager = Object.FindAnyObjectByType<Program1>();
+            if (manager != null && !string.IsNullOrEmpty(manager.currentCivName))
+                return manager.currentCivName;
+            return "Rome";
+        }
+
         if (name.Contains("Rome")) return "Rome";
         if (name.Contains("America")) return "America";
         if (name.Contains("Egypt")) return "Egypt";
         if (name.Contains("Scythia")) return "Scythia";
-        
         return "Unknown";
     }
 
@@ -160,77 +205,89 @@ public class Unit : MonoBehaviour
     }
 
     // Метод для перевірки чи є юніти ворогами
-    bool AreEnemies(Unit otherUnit)
+    bool AreEnemies(Unit otherUnit, Program1 manager = null)
     {
-        if (otherUnit == null) return false;
+        if (otherUnit == null || otherUnit.isPlayer == isPlayer) return false;
 
         DiplomacyManager diplomacy = DiplomacyManager.Instance;
-        if (diplomacy == null || !diplomacy.isAtWar) return false;
+        if (diplomacy == null) return false;
 
-        // Повертаємо стару поведінку: під час війни всі AI ворожі до гравця і навпаки.
-        if (isPlayer) return !otherUnit.isPlayer;
-        return otherUnit.isPlayer;
+        string otherCiv = otherUnit.GetCivName(manager);
+        if (string.IsNullOrEmpty(otherCiv) || otherCiv == "Unknown") return false;
+
+        if (isPlayer)
+            return diplomacy.IsAtWarWith(otherCiv);
+
+        if (otherUnit.isPlayer)
+        {
+            if (manager == null) manager = Object.FindAnyObjectByType<Program1>();
+            string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+            return diplomacy.IsAtWarWith(GetCivName(manager));
+        }
+
+        return false;
     }
 
-    IEnumerator JumpAttack(Unit target, Program1 manager)
+    public IEnumerator JumpAttack(Unit target, Program1 manager)
     {
         if (target == null || manager == null || manager.tilemap == null)
             yield break;
 
-        Vector3 startPos = transform.position;
-        Vector3 targetCellPos = manager.tilemap.GetCellCenterWorld(target.gridPosition);
-        targetCellPos.y -= 1f;
-        targetCellPos.z = -0.1f;
+        UnitAnimator anim = GetComponent<UnitAnimator>();
+        Vector3 targetPos = manager.tilemap.GetCellCenterWorld(target.gridPosition);
+        targetPos.y -= 1f;
 
-        // Стрибаємо не в саму клітинку цілі, а трохи перед нею.
-        Vector3 attackPos = Vector3.Lerp(startPos, targetCellPos, 0.6f);
-
-        float forwardDuration = 0.12f;
-        float backDuration = 0.10f;
-        float jumpHeight = 0.22f;
-
-        for (float t = 0f; t < forwardDuration; t += Time.deltaTime)
+        if (anim != null)
         {
-            float k = t / forwardDuration;
-            Vector3 p = Vector3.Lerp(startPos, attackPos, k);
-            p.y += Mathf.Sin(k * Mathf.PI) * jumpHeight;
-            transform.position = p;
-            yield return null;
+            anim.FaceToward(targetPos - transform.position);
+            yield return StartCoroutine(anim.PlayAttackRoutine(target, attackPower));
         }
+        else
 
         transform.position = attackPos;
         target.TakeDamage(attackPower, this);
 
         for (float t = 0f; t < backDuration; t += Time.deltaTime)
         {
-            float k = t / backDuration;
-            Vector3 p = Vector3.Lerp(attackPos, startPos, k);
-            p.y += Mathf.Sin((1f - k) * Mathf.PI) * jumpHeight * 0.5f;
-            transform.position = p;
-            yield return null;
+            target.TakeDamage(attackPower);
         }
-
-        transform.position = startPos;
     }
 
     public IEnumerator MoveAlongPath(List<Vector3Int> path, Tilemap tilemap, Program1 manager)
     {
+        UnitAnimator anim = GetComponent<UnitAnimator>();
+        if (path.Count > 0)
+        {
+            if (anim != null) anim.PlayWalk();
+        }
+
         foreach (var cell in path)
         {
+            // Перевіряємо чи юніт ще існує
+            if (this == null || gameObject == null)
+            {
+                Debug.LogWarning("Юніт був знищений під час руху");
+                yield break;
+            }
+
             // Блокуємо вхід на зайняту клітинку.
             // Виняток: якщо там ворог і є війна — виконуємо атаку.
             Unit occupant = manager.GetUnitAt(cell);
             if (occupant != null && occupant != this)
             {
-                bool areEnemies = occupant.isPlayer != this.isPlayer && AreEnemies(occupant);
-                if (areEnemies)
+                if (occupant.isPlayer != this.isPlayer)
                 {
-                    yield return StartCoroutine(JumpAttack(occupant, manager));
-                    currentMovement = 0; // Витрачаємо всі очки руху на атаку
+                    if (AreEnemies(occupant, manager))
+                    {
+                        yield return StartCoroutine(JumpAttack(occupant, manager));
+                        currentMovement = 0;
+                        break;
+                    }
+
+                    Debug.Log("Неможливо атакувати — війну не оголошено проти " + occupant.GetCivName(manager));
                     break;
                 }
 
-                // Клітинка зайнята будь-яким іншим юнітом (свій або неворожий) — рух зупиняємо.
                 break;
             }
 
@@ -243,16 +300,32 @@ public class Unit : MonoBehaviour
             targetPos.y -= 1f;
             targetPos.z = -0.1f;
 
+            // Додаємо тайм-аут для запобігання безкінечних циклів
+            float timeout = 2f;
+            float elapsed = 0f;
+
             while (Vector3.Distance(transform.position, targetPos) > 0.005f)
             {
                 // Однакова швидкість руху для гравця та AI.
                 transform.position = Vector3.MoveTowards(transform.position, targetPos, moveSpeed * Time.deltaTime);
+                elapsed += Time.deltaTime;
+
+                if (elapsed >= timeout)
+                {
+                    Debug.LogWarning($"Юніт {name} застряг при русі до {cell}, примусово завершуємо рух");
+                    break;
+                }
+
                 yield return null;
             }
 
             transform.position = targetPos;
             gridPosition = cell;
             currentMovement -= cost;
+
+            FogOfWarManager fog = manager.GetFogOfWar();
+            if (fog != null)
+                fog.OnUnitMoved(this);
 
             if (isPlayer && FogOfWarManager.Instance != null)
             {
@@ -290,5 +363,8 @@ public class Unit : MonoBehaviour
                 }
             }
         }
+
+        // Завжди зупиняємо анімацію після завершення руху
+        if (anim != null) anim.PlayIdle();
     }
 }

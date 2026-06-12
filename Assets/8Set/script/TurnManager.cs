@@ -8,26 +8,16 @@ public class TurnManager : MonoBehaviour
     
     public void EndPlayerTurn()
     {
-        Debug.Log("=== ЗАВЕРШЕННЯ ХОДУ ===");
-        Debug.Log("Хід " + currentTurn + " завершено");
-        
-        // Знаходимо Program1 для доступу до списку юнітів
+        // Перенаправляємо на Program1.NextTurn() для керування AI
         Program1 manager = Object.FindAnyObjectByType<Program1>();
         if (manager != null)
         {
-            Debug.Log("Program1 знайдено, скидаємо очки руху для всіх юнітів");
-            
-            int unitsReset = 0;
-            foreach (Unit u in manager.allUnits)
-            {
-                u.ResetMovement();
-                unitsReset++;
-            }
-            
-            Debug.Log("Очки руху скинуто для " + unitsReset + " юнітів");
+            Debug.Log("TurnManager: перенаправляємо на Program1.NextTurn()");
+            manager.NextTurn();
         }
         else
         {
+            Debug.LogError("TurnManager: Program1 не знайдено!");
             Debug.LogError("Program1 не знайдено!");
         }
         
