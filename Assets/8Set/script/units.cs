@@ -15,7 +15,8 @@ public class Unit : MonoBehaviour
     public int currentMovement;
     public float moveSpeed = 4f;
     public Vector3Int gridPosition;
-    public bool isSelected; // Додано для перевірки стану вибору
+    public bool isSelected;
+    [HideInInspector] public Unit lastAttacker;
 
     // Властивість для TurnManager
     public bool canMove => currentMovement > 0;
@@ -51,12 +52,18 @@ public class Unit : MonoBehaviour
     public void ResetMovement() => currentMovement = maxMovement;
 
     // Метод для отримання шкоди
-    public void TakeDamage(int damage)
+    public void TakeDamage(int damage, Unit attacker = null)
     {
+        if (attacker != null)
+            lastAttacker = attacker;
+
         health -= damage;
         Debug.Log(name + " отримав шкоду. HP: " + health);
         if (health <= 0)
         {
+            if (EconomyManager.Instance != null && lastAttacker != null)
+                EconomyManager.Instance.AwardKillReward(lastAttacker, this);
+
             Program1 manager = Object.FindAnyObjectByType<Program1>();
             if (manager != null) manager.RemoveUnit(this);
             Destroy(gameObject);
@@ -87,7 +94,7 @@ public class Unit : MonoBehaviour
             City city = cityObj.GetComponent<City>() ?? cityObj.AddComponent<City>();
             city.gridPosition = cityPos;
             city.isPlayerCity = isPlayer;
-            city.ownerCivName = GetCivName();
+            city.ownerCivName = isPlayer ? manager.currentCivName : GetCivName();
             
             // Встановлюємо власника міста через City компонент
             // City не має isPlayer та civName, тому просто реєструємо місто
@@ -192,7 +199,7 @@ public class Unit : MonoBehaviour
         }
 
         transform.position = attackPos;
-        target.TakeDamage(attackPower);
+        target.TakeDamage(attackPower, this);
 
         for (float t = 0f; t < backDuration; t += Time.deltaTime)
         {
@@ -246,7 +253,15 @@ public class Unit : MonoBehaviour
             transform.position = targetPos;
             gridPosition = cell;
             currentMovement -= cost;
-            
+
+            if (isPlayer && FogOfWarManager.Instance != null)
+            {
+                int sight = UnitTypeHelper.GetKind(this) == UnitTypeHelper.UnitKind.Scout
+                    ? FogOfWarManager.Instance.scoutSightRange
+                    : FogOfWarManager.Instance.defaultSightRange;
+                FogOfWarManager.Instance.RevealAround(cell, sight);
+            }
+
             // Дуже мала затримка для плавності руху
             yield return new WaitForSeconds(0.02f);
             
