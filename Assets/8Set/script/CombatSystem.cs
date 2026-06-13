@@ -42,10 +42,7 @@ public class CombatSystem : MonoBehaviour
     void Awake()
     {
         if (instance == null)
-        {
             instance = this;
-            DontDestroyOnLoad(gameObject);
-        }
         else
         {
             Destroy(gameObject);
@@ -60,19 +57,23 @@ public class CombatSystem : MonoBehaviour
     
     void InitializeUnitStats()
     {
-        // Визначаємо статистику для різних типів юнітів
-        unitStats["Settler"] = new UnitStats("Settler", 10, 0, 2, 2, 0);
-        unitStats["Warrior"] = new UnitStats("Warrior", 20, 6, 5, 2, 1);
-        unitStats["Archer"] = new UnitStats("Archer", 15, 5, 3, 2, 2);
-        unitStats["Swordsman"] = new UnitStats("Swordsman", 25, 7, 6, 2, 1);
-        unitStats["Horseman"] = new UnitStats("Horseman", 18, 8, 4, 4, 1);
-        unitStats["Scout"] = new UnitStats("Scout", 12, 4, 2, 4, 1);
+        unitStats["Settler"] = new UnitStats("Settler", 50, 0, 0, 3, 0);
+        unitStats["Scout"] = new UnitStats("Scout", 25, 10, 0, 4, 1);
+        unitStats["Warrior"] = new UnitStats("Warrior", 50, 25, 0, 3, 1);
+        unitStats["Swordsman"] = new UnitStats("Swordsman", 50, 25, 0, 3, 1);
+        unitStats["Archer"] = new UnitStats("Archer", 25, 15, 0, 2, 2);
+        unitStats["Horseman"] = new UnitStats("Horseman", 40, 20, 0, 4, 1);
     }
 
     void CacheMapManager()
     {
-        if (mapManager == null)
-            mapManager = Object.FindAnyObjectByType<Program1>();
+        mapManager = Object.FindAnyObjectByType<Program1>();
+    }
+
+    Program1 GetMapManager()
+    {
+        CacheMapManager();
+        return mapManager;
     }
     
     public bool CanAttack(Unit attacker, Unit defender)
@@ -80,6 +81,7 @@ public class CombatSystem : MonoBehaviour
         if (attacker == null || defender == null) return false;
         if (attacker.isPlayer == defender.isPlayer) return false;
         if (attacker.currentMovement <= 0) return false;
+        if (attacker.hasAttackedThisTurn) return false;
 
         DiplomacyManager diplomacy = DiplomacyManager.Instance;
         if (diplomacy != null)
@@ -87,10 +89,22 @@ public class CombatSystem : MonoBehaviour
             string defenderCiv = defender.GetCivName();
             if (attacker.isPlayer && !diplomacy.IsAtWarWith(defenderCiv))
                 return false;
+            if (!attacker.isPlayer && !defender.isPlayer)
+            {
+                Program1 map = Object.FindAnyObjectByType<Program1>();
+                if (map == null) return false;
+                if (!diplomacy.AreAtWar(attacker.GetCivName(map), defender.GetCivName(map)))
+                    return false;
+            }
+            if (!attacker.isPlayer && defender.isPlayer && GetMapManager() != null)
+            {
+                if (!diplomacy.AreAtWar(attacker.GetCivName(mapManager), mapManager.currentCivName))
+                    return false;
+            }
         }
 
         UnitStats attackerStats = GetUnitStats(attacker);
-        if (attackerStats.attackRange == 0) return false;
+        if (attackerStats.attackPower <= 0 || attackerStats.attackRange <= 0) return false;
 
         int distance = CalculateDistance(attacker.gridPosition, defender.gridPosition);
         return distance <= attackerStats.attackRange;
@@ -105,31 +119,28 @@ public class CombatSystem : MonoBehaviour
         }
 
         UnitStats attackerStats = GetUnitStats(attacker);
-        UnitStats defenderStats = GetUnitStats(defender);
-        int damage = CalculateDamage(attackerStats, defenderStats);
+        int damage = attackerStats.attackPower;
 
         Debug.Log($"{attacker.name} атакує {defender.name}!");
 
         UnitAnimator attackerAnim = attacker.GetComponent<UnitAnimator>();
-        Program1 map = Object.FindAnyObjectByType<Program1>();
+        Program1 map = GetMapManager();
         bool defenderDestroyed = false;
 
         if (attackerAnim != null && map != null && map.tilemap != null)
         {
-            Vector3 defenderPos = map.tilemap.GetCellCenterWorld(defender.gridPosition);
-            defenderPos.y -= 1f;
+            Vector3 defenderPos = map.GetUnitPositionForCell(defender.gridPosition);
             attackerAnim.FaceToward(defenderPos - attacker.transform.position);
             defender.lastAttacker = attacker;
             yield return StartCoroutine(attackerAnim.PlayAttackRoutine(defender, damage));
-            defenderDestroyed = defender == null;
+            defenderDestroyed = defender == null || defender.health <= 0;
         }
         else
         {
-            CacheMapManager();
-            if (combatEffectPrefab != null && mapManager != null && mapManager.tilemap != null)
+            if (combatEffectPrefab != null && map != null && map.tilemap != null)
             {
                 GameObject effect = Instantiate(combatEffectPrefab,
-                    mapManager.tilemap.GetCellCenterWorld(defender.gridPosition),
+                    map.tilemap.GetCellCenterWorld(defender.gridPosition),
                     Quaternion.identity);
                 Destroy(effect, combatAnimationDuration);
             }
@@ -138,9 +149,15 @@ public class CombatSystem : MonoBehaviour
             defenderDestroyed = ApplyDamage(defender, damage, attacker);
         }
 
+        attacker.hasAttackedThisTurn = true;
         attacker.currentMovement = 0;
 
-        if (defenderDestroyed && defender != null)
+        map?.NotifyTurnStateChanged();
+
+        if (attackerAnim != null && attacker != null)
+            attackerAnim.ForceIdle();
+
+        if (defenderDestroyed)
             OnUnitDestroyed(attacker, defender);
 
         CheckCombatEnd(attacker, defender);
@@ -148,33 +165,23 @@ public class CombatSystem : MonoBehaviour
     
     int CalculateDamage(UnitStats attackerStats, UnitStats defenderStats)
     {
-        // Базова формула: Атака - Захист + Випадковий модифікатор
-        int baseDamage = attackerStats.attackPower - defenderStats.defensePower;
-        
-        // Додаємо випадковий фактор (-3 до +3)
-        int randomModifier = Random.Range(-3, 4);
-        
-        int finalDamage = baseDamage + randomModifier;
-        
-        // Мінімальне пошкодження - 1
-        finalDamage = Mathf.Max(1, finalDamage);
-        
-        Debug.Log($"Розрахунок пошкодження: {attackerStats.attackPower} (атака) - {defenderStats.defensePower} (захист) + {randomModifier} (випадковість) = {finalDamage}");
-        
-        return finalDamage;
+        return attackerStats.attackPower;
     }
-    
+
     bool ApplyDamage(Unit unit, int damage, Unit attacker)
     {
+        if (unit == null) return true;
+
         if (unit.GetComponent<UnitHealth>() == null)
         {
             int hpBefore = unit.health;
             unit.TakeDamage(damage, attacker);
-            return unit == null || hpBefore - damage <= 0;
+            return unit == null || hpBefore - damage <= 0 || unit.IsDead;
         }
 
         UnitHealth health = unit.GetComponent<UnitHealth>();
         health.TakeDamage(damage);
+        unit.health = health.currentHealth;
 
         if (health.currentHealth <= 0)
         {
@@ -185,36 +192,80 @@ public class CombatSystem : MonoBehaviour
         Debug.Log($"{unit.name} отримав {damage} пошкоджень, залишилось {health.currentHealth} здоров'я");
         return false;
     }
+
+    static CivilizationAI FindCivilizationAI(string civName)
+    {
+        if (string.IsNullOrEmpty(civName)) return null;
+
+        foreach (CivilizationAI ai in Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None))
+        {
+            if (ai != null && ai.civilizationName == civName)
+                return ai;
+        }
+
+        return null;
+    }
+
+    public UnitStats GetStatsForKind(UnitTypeHelper.UnitKind kind)
+    {
+        string key = UnitTypeHelper.GetTypeName(kind);
+        if (unitStats.ContainsKey(key))
+            return unitStats[key];
+
+        return unitStats["Warrior"];
+    }
+
+    public void ApplyStatsToUnit(Unit unit)
+    {
+        if (unit == null)
+            return;
+
+        UnitStats stats = GetUnitStats(unit);
+        unit.maxMovement = stats.movementRange;
+        unit.attackPower = stats.attackPower;
+        unit.health = stats.maxHealth;
+        unit.currentMovement = unit.maxMovement;
+        unit.hasAttackedThisTurn = false;
+
+        UnitHealth health = unit.GetComponent<UnitHealth>();
+        if (health != null)
+        {
+            health.maxHealth = stats.maxHealth;
+            health.currentHealth = stats.maxHealth;
+        }
+    }
+
+    public int GetAttackDamage(Unit unit)
+    {
+        return GetUnitStats(unit).attackPower;
+    }
     
+    public void NotifyUnitDestroyed(Unit attacker, Unit defender)
+    {
+        OnUnitDestroyed(attacker, defender);
+    }
+
     void OnUnitDestroyed(Unit attacker, Unit defender)
     {
-        if (EconomyManager.Instance != null)
+        if (defender == null) return;
+
+        if (EconomyManager.Instance != null && attacker != null)
             EconomyManager.Instance.AwardKillReward(attacker, defender);
 
-        DiplomacyManager diplomacy = Object.FindAnyObjectByType<DiplomacyManager>();
+        Program1 map = GetMapManager();
+        string attackerCiv = attacker != null ? attacker.GetCivName(map) : "Unknown";
+        string defenderCiv = defender.GetCivName(map);
+
+        DiplomacyManager diplomacy = DiplomacyManager.Instance;
         if (diplomacy != null)
-        {
-            string attackerCiv = attacker.isPlayer ? "Player" : "AI";
-            string defenderCiv = defender.isPlayer ? "Player" : "AI";
             diplomacy.OnUnitDestroyed(attackerCiv, defenderCiv);
-        }
-        
-        // Видаляємо юніта з гри
-        Program1 mapManager = Object.FindAnyObjectByType<Program1>();
-        if (mapManager != null)
-        {
-            mapManager.RemoveUnit(defender);
-        }
-        
-        // Повідомляємо AI системи
-        CivilizationAI ai = Object.FindAnyObjectByType<CivilizationAI>();
+
+        CivilizationAI ai = FindCivilizationAI(defenderCiv);
         if (ai != null)
-        {
             ai.RemoveUnit(defender);
-        }
-        
-        // Знищуємо об'єкт
-        Destroy(defender.gameObject);
+
+        if ((attacker != null && attacker.isPlayer) || (defender != null && defender.isPlayer))
+            SaveManager.Instance?.MarkUnsaved();
     }
     
     void CheckCombatEnd(Unit attacker, Unit defender)
@@ -239,7 +290,7 @@ public class CombatSystem : MonoBehaviour
         
         if (mapManager == null) return enemies;
         
-        foreach (Unit other in mapManager.allUnits)
+        foreach (Unit other in mapManager.allUnits.ToArray())
         {
             if (other != null && other != unit && other.isPlayer != unit.isPlayer)
             {
@@ -256,15 +307,14 @@ public class CombatSystem : MonoBehaviour
     
     int CalculateDistance(Vector3Int pos1, Vector3Int pos2)
     {
-        // Для гексагональної сітки використовуємо спеціальну формулу
-        int dx = Mathf.Abs(pos1.x - pos2.x);
-        int dy = Mathf.Abs(pos1.y - pos2.y);
-        
-        // Спрощена відстань для гексів
-        return Mathf.Max(dx, dy);
+        Program1 map = GetMapManager();
+        if (map != null)
+            return map.GetHexDistance(pos1, pos2);
+
+        return Mathf.Max(Mathf.Abs(pos1.x - pos2.x), Mathf.Abs(pos1.y - pos2.y));
     }
     
-    UnitStats GetUnitStats(Unit unit)
+    public UnitStats GetUnitStats(Unit unit)
     {
         string unitType = unit.name.Contains("Settler") ? "Settler" :
                          unit.name.Contains("Scout") ? "Scout" :
@@ -278,7 +328,6 @@ public class CombatSystem : MonoBehaviour
             return unitStats[unitType];
         }
         
-        // Повертаємо стандартні stats для воїна
         return unitStats["Warrior"];
     }
     
@@ -291,7 +340,7 @@ public class CombatSystem : MonoBehaviour
         
         UnitStats attackerStats = GetUnitStats(attacker);
         
-        foreach (Unit other in mapManager.allUnits)
+        foreach (Unit other in mapManager.allUnits.ToArray())
         {
             if (other != null && other != attacker && other.isPlayer != attacker.isPlayer)
             {
@@ -326,6 +375,10 @@ public class CombatSystem : MonoBehaviour
         if (health != null)
         {
             info += $"Здоров'я: {health.currentHealth}/{health.maxHealth}\n";
+        }
+        else
+        {
+            info += $"Здоров'я: {unit.health}/{stats.maxHealth}\n";
         }
         
         info += $"Рух: {unit.currentMovement}/{stats.movementRange}";

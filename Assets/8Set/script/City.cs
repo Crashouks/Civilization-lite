@@ -8,6 +8,66 @@ public class City : MonoBehaviour
     public string ownerCivName = "Unknown";
     public string cityName = "City";
     public bool isCapital;
+    public int foundedTurn;
+
+    public const int CoinsPerCitizen = 5;
+    public const int TurnsPerCitizenGrowth = 10;
+    public const int HpPerCitizen = 25;
+
+    public int maxHealth;
+    public int currentHealth;
+    int lastCitizenCount;
+
+    public void InitializeFoundedTurn(int turn)
+    {
+        if (foundedTurn <= 0 && turn > 0)
+            foundedTurn = turn;
+    }
+
+    public int GetTurnsSinceFounded(int currentTurn)
+    {
+        if (foundedTurn <= 0)
+            return 0;
+
+        return Mathf.Max(0, currentTurn - foundedTurn);
+    }
+
+    public int GetCitizenCount(int currentTurn)
+    {
+        return 1 + GetTurnsSinceFounded(currentTurn) / TurnsPerCitizenGrowth;
+    }
+
+    public int GetIncome(int currentTurn)
+    {
+        return GetCitizenCount(currentTurn) * CoinsPerCitizen;
+    }
+
+    public int GetMaxHealth(int currentTurn)
+    {
+        return GetCitizenCount(currentTurn) * HpPerCitizen;
+    }
+
+    public void RefreshHealth(int currentTurn)
+    {
+        int citizens = GetCitizenCount(currentTurn);
+        int newMax = citizens * HpPerCitizen;
+
+        if (lastCitizenCount > 0 && citizens > lastCitizenCount)
+            currentHealth += (citizens - lastCitizenCount) * HpPerCitizen;
+
+        maxHealth = newMax;
+        lastCitizenCount = citizens;
+
+        if (currentHealth <= 0 || currentHealth > maxHealth)
+            currentHealth = maxHealth;
+    }
+
+    public bool TakeDamage(int damage, int currentTurn)
+    {
+        RefreshHealth(currentTurn);
+        currentHealth = Mathf.Max(0, currentHealth - damage);
+        return currentHealth <= 0;
+    }
 
     public string GetDisplayName()
     {
@@ -18,6 +78,21 @@ public class City : MonoBehaviour
             return ownerCivName + " City";
 
         return "City";
+    }
+
+    public bool IsOwnedByPlayer()
+    {
+        if (isPlayerCity)
+            return true;
+
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        string playerCiv = manager != null
+            ? manager.currentCivName
+            : PlayerPrefs.GetString("SelectedCiv", "Rome");
+
+        return !string.IsNullOrEmpty(ownerCivName)
+            && ownerCivName != "Unknown"
+            && ownerCivName == playerCiv;
     }
 
     public void EnsureDisplayName(Program1 manager = null)
@@ -71,28 +146,6 @@ public class City : MonoBehaviour
         Debug.Log("Місто ініціалізовано на позиції: " + pos);
     }
     
-    void OnDrawGizmos()
-    {
-        // Малюємо гізмо для візуалізації в редакторі
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, 0.5f);
-    }
-    
-    void OnMouseEnter()
-    {
-        // Візуальний ефект при наведенні миші
-        Debug.Log("Наведено на місто: " + name);
-    }
-
-    void OnMouseDown()
-    {
-        Program1 manager = Object.FindAnyObjectByType<Program1>();
-        if (manager != null)
-        {
-            manager.OnCityClicked(this);
-        }
-    }
-
     public void SetFogVisibility(bool visible)
     {
         CityLabel label = GetComponent<CityLabel>();
@@ -103,6 +156,12 @@ public class City : MonoBehaviour
         {
             if (sr == null || sr.GetComponentInParent<CityLabel>() != null) continue;
             sr.enabled = visible;
+        }
+
+        foreach (Collider2D col in GetComponentsInChildren<Collider2D>(true))
+        {
+            if (col != null)
+                col.enabled = visible;
         }
     }
 

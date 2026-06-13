@@ -1,6 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 public class CityLabel : MonoBehaviour
 {
@@ -15,12 +13,11 @@ public class CityLabel : MonoBehaviour
     static readonly string[] CivDisplayNames = { "Rome", "America", "Egypt", "Scythia" };
     static readonly System.Collections.Generic.Dictionary<string, int> cityCounters = new System.Collections.Generic.Dictionary<string, int>();
 
-    Canvas canvas;
-    RectTransform canvasRect;
-    Image backgroundImage;
-    Image accentImage;
-    TextMeshProUGUI cityNameText;
-    TextMeshProUGUI civNameText;
+    static Sprite whiteSprite;
+    static Font labelFont;
+
+    Transform labelRoot;
+    TextMesh cityNameMesh;
 
     public static string GenerateCityName(string civName, bool isCapital)
     {
@@ -38,88 +35,121 @@ public class CityLabel : MonoBehaviour
         return pool[Mathf.Min(index, pool.Length - 1)];
     }
 
+    void Awake()
+    {
+        CleanupLegacyLabels();
+    }
+
+    void Start()
+    {
+        if (labelRoot != null) return;
+
+        City city = GetComponent<City>();
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        if (city == null || manager == null) return;
+
+        city.EnsureDisplayName(manager);
+        Setup(city.cityName, city.ownerCivName, manager.GetCivColor(city.ownerCivName), city.isCapital);
+    }
+
     public void Setup(string cityName, string civName, Color civColor, bool isCapital)
     {
-        if (canvas == null)
-            BuildBanner();
+        CleanupLegacyLabels();
+        BuildBanner(civColor);
 
-        if (cityNameText != null)
-            cityNameText.text = isCapital ? cityName + " *" : cityName;
-
-        if (civNameText != null)
-            civNameText.text = civName;
-
-        if (accentImage != null)
-            accentImage.color = civColor;
+        if (cityNameMesh != null)
+            cityNameMesh.text = cityName;
     }
 
     public void SetVisible(bool visible)
     {
-        if (canvas != null)
-            canvas.gameObject.SetActive(true); // Завжди показуємо мітку міста
+        if (labelRoot != null)
+            labelRoot.gameObject.SetActive(visible);
     }
 
-    void BuildBanner()
+    void CleanupLegacyLabels()
     {
-        // Створюємо Canvas для World Space UI
-        GameObject canvasObj = new GameObject("CityLabelCanvas");
-        canvasObj.transform.SetParent(transform, false);
-        canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.WorldSpace;
-        canvas.sortingOrder = 999999; // Найвищий пріоритет для рендеру поверх усього
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = transform.GetChild(i);
+            if (IsLabelChild(child))
+                Destroy(child.gameObject);
+        }
 
-        canvasRect = canvasObj.GetComponent<RectTransform>();
-        canvasRect.localPosition = new Vector3(0f, 1.2f, 0f);
-        canvasRect.localScale = Vector3.one * 0.006f; // Ще менший масштаб для меншої панелі
-        canvasRect.sizeDelta = new Vector2(350, 80);
+        labelRoot = null;
+        cityNameMesh = null;
+    }
 
-        // Додаємо GraphicRaycaster для взаємодії
-        canvasObj.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+    static bool IsLabelChild(Transform child)
+    {
+        if (child == null) return false;
+        if (child.name == "CityLabelRoot" || child.name == "CityLabelCanvas")
+            return true;
+        if (child.GetComponent<Canvas>() != null)
+            return true;
+        if (child.GetComponent<TextMesh>() != null)
+            return true;
+        return child.name.Contains("Label");
+    }
 
-        // Фон
+    static Font GetLabelFont()
+    {
+        if (labelFont == null)
+            labelFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        return labelFont;
+    }
+
+    static Sprite GetWhiteSprite()
+    {
+        if (whiteSprite == null)
+            whiteSprite = CreateRectSprite(Color.white);
+        return whiteSprite;
+    }
+
+    void BuildBanner(Color civColor)
+    {
+        GameObject rootObj = new GameObject("CityLabelRoot");
+        labelRoot = rootObj.transform;
+        labelRoot.SetParent(transform, false);
+        labelRoot.localPosition = new Vector3(0f, 0.72f, -0.05f);
+
         GameObject bgObj = new GameObject("Background");
-        bgObj.transform.SetParent(canvasRect, false);
-        RectTransform bgRect = bgObj.AddComponent<RectTransform>();
-        bgRect.anchorMin = Vector2.zero;
-        bgRect.anchorMax = Vector2.one;
-        bgRect.sizeDelta = Vector2.zero;
-        backgroundImage = bgObj.AddComponent<UnityEngine.UI.Image>();
-        backgroundImage.color = new Color(0.08f, 0.08f, 0.1f, 0.92f);
+        bgObj.transform.SetParent(labelRoot, false);
+        SpriteRenderer bg = bgObj.AddComponent<SpriteRenderer>();
+        bg.sprite = GetWhiteSprite();
+        bg.color = new Color(0.1f, 0.07f, 0.04f, 0.96f);
+        bg.sortingOrder = 50;
+        bgObj.transform.localScale = new Vector3(1.65f, 0.34f, 1f);
 
-        // Акцент (кольорова смужка)
         GameObject accentObj = new GameObject("Accent");
-        accentObj.transform.SetParent(canvasRect, false);
-        RectTransform accentRect = accentObj.AddComponent<RectTransform>();
-        accentRect.anchorMin = new Vector2(0f, 0f);
-        accentRect.anchorMax = new Vector2(0.1f, 1f);
-        accentRect.sizeDelta = Vector2.zero;
-        accentImage = accentObj.AddComponent<UnityEngine.UI.Image>();
-        accentImage.color = Color.white;
+        accentObj.transform.SetParent(labelRoot, false);
+        accentObj.transform.localPosition = new Vector3(-0.74f, 0f, -0.001f);
+        accentObj.transform.localScale = new Vector3(0.05f, 0.3f, 1f);
+        SpriteRenderer accent = accentObj.AddComponent<SpriteRenderer>();
+        accent.sprite = GetWhiteSprite();
+        accent.color = civColor;
+        accent.sortingOrder = 51;
 
-        // Назва цивілізації
-        GameObject civObj = new GameObject("CivName");
-        civObj.transform.SetParent(canvasRect, false);
-        RectTransform civRect = civObj.AddComponent<RectTransform>();
-        civRect.anchorMin = new Vector2(0.15f, 0.6f);
-        civRect.anchorMax = new Vector2(0.9f, 0.9f);
-        civRect.sizeDelta = Vector2.zero;
-        civNameText = civObj.AddComponent<TextMeshProUGUI>();
-        civNameText.fontSize = 14;
-        civNameText.alignment = TextAlignmentOptions.Left;
-        civNameText.color = new Color(0.85f, 0.85f, 0.9f, 1f);
+        GameObject textObj = new GameObject("CityName");
+        textObj.transform.SetParent(labelRoot, false);
+        textObj.transform.localPosition = new Vector3(0.04f, 0f, -0.002f);
 
-        // Назва міста
-        GameObject cityObj = new GameObject("CityName");
-        cityObj.transform.SetParent(canvasRect, false);
-        RectTransform cityRect = cityObj.AddComponent<RectTransform>();
-        cityRect.anchorMin = new Vector2(0.15f, 0.2f);
-        cityRect.anchorMax = new Vector2(0.9f, 0.5f);
-        cityRect.sizeDelta = Vector2.zero;
-        cityNameText = cityObj.AddComponent<TextMeshProUGUI>();
-        cityNameText.fontSize = 22;
-        cityNameText.fontStyle = FontStyles.Bold;
-        cityNameText.alignment = TextAlignmentOptions.Left;
-        cityNameText.color = Color.white;
+        cityNameMesh = textObj.AddComponent<TextMesh>();
+        cityNameMesh.font = GetLabelFont();
+        cityNameMesh.fontSize = 64;
+        cityNameMesh.characterSize = 0.045f;
+        cityNameMesh.anchor = TextAnchor.MiddleCenter;
+        cityNameMesh.alignment = TextAlignment.Center;
+        cityNameMesh.color = new Color(0.98f, 0.94f, 0.86f, 1f);
+        cityNameMesh.fontStyle = FontStyle.Bold;
+
+        MeshRenderer textRenderer = textObj.GetComponent<MeshRenderer>();
+        if (textRenderer != null)
+        {
+            textRenderer.sortingOrder = 52;
+            if (cityNameMesh.font != null && cityNameMesh.font.material != null)
+                textRenderer.sharedMaterial = cityNameMesh.font.material;
+        }
     }
 
     static Sprite CreateRectSprite(Color color)
@@ -135,10 +165,7 @@ public class CityLabel : MonoBehaviour
 
     void LateUpdate()
     {
-        // Обертаємо canvas щоб він завжди був звернен до камери
-        if (canvas != null && Camera.main != null)
-        {
-            canvasRect.transform.rotation = Camera.main.transform.rotation;
-        }
+        if (labelRoot != null && Camera.main != null)
+            labelRoot.rotation = Camera.main.transform.rotation;
     }
 }

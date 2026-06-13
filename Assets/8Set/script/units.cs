@@ -7,8 +7,10 @@ public class Unit : MonoBehaviour
 {
     [Header("Параметри фракції та бою")]
     public bool isPlayer = true; // Додано для ШІ та DiplomacyManager
-    public int health = 100;      // Додано для бойової системи
-    public int attackPower = 25;  // Додано для бойової системи
+    public string ownerCivName;
+    public int health = 100;
+    public int attackPower = 25;
+    public bool hasAttackedThisTurn;
 
     [Header("Параметри руху")]
     public int maxMovement = 3;
@@ -16,7 +18,11 @@ public class Unit : MonoBehaviour
     public float moveSpeed = 9f;
     public Vector3Int gridPosition;
     public bool isSelected;
+    public bool hasScoutedFog;
+    [HideInInspector] public bool fogVisibleToPlayer = true;
     [HideInInspector] public Unit lastAttacker;
+
+    bool isDead;
 
     // Властивість для TurnManager
     public bool canMove => currentMovement > 0;
@@ -48,12 +54,47 @@ public class Unit : MonoBehaviour
         if (spriteRenderer != null) spriteRenderer.color = normalColor;
     }
 
+    public bool IsFogVisibleToPlayer() => fogVisibleToPlayer;
+
+    public void SetFogVisibility(bool visibleToPlayer)
+    {
+        fogVisibleToPlayer = visibleToPlayer;
+
+        foreach (SpriteRenderer sr in GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (sr != null)
+                sr.enabled = visibleToPlayer;
+        }
+
+        foreach (Collider2D col in GetComponentsInChildren<Collider2D>(true))
+        {
+            if (col != null)
+                col.enabled = visibleToPlayer;
+        }
+
+        if (!visibleToPlayer && selectionCircle != null)
+            selectionCircle.SetActive(false);
+    }
+
     public void ResetTurn() => ResetMovement();
-    public void ResetMovement() => currentMovement = maxMovement;
+    public void ResetMovement()
+    {
+        currentMovement = maxMovement;
+        hasAttackedThisTurn = false;
+    }
+
+    public bool CanAttackThisTurn()
+    {
+        return !hasAttackedThisTurn && attackPower > 0;
+    }
+
+    public bool IsDead => isDead || health <= 0;
 
     // Метод для отримання шкоди
     public void TakeDamage(int damage, Unit attacker = null)
     {
+        if (isDead) return;
+
         if (attacker != null)
             lastAttacker = attacker;
 
@@ -66,6 +107,7 @@ public class Unit : MonoBehaviour
 
         if (health <= 0)
         {
+            isDead = true;
             if (anim != null)
             {
                 anim.PlayDeathAnimation();
@@ -75,12 +117,6 @@ public class Unit : MonoBehaviour
             {
                 RemoveFromGame();
             }
-            if (EconomyManager.Instance != null && lastAttacker != null)
-                EconomyManager.Instance.AwardKillReward(lastAttacker, this);
-
-            Program1 manager = Object.FindAnyObjectByType<Program1>();
-            if (manager != null) manager.RemoveUnit(this);
-            Destroy(gameObject);
         }
     }
 
@@ -111,10 +147,21 @@ public class Unit : MonoBehaviour
             Debug.Log("На цій клітинці вже є місто!");
             return;
         }
-        
+
+        if (!manager.IsValidCitySite(cityPos))
+        {
+            Debug.Log("Тут не можна заснувати місто — замало відстані до інших міст.");
+            return;
+        }
+
+        string civName = GetCivName(manager);
+        if (!isPlayer && !manager.IsValidAiCitySite(civName, cityPos))
+        {
+            Debug.Log("AI не може заснувати місто — занадто далеко від своїх міст.");
+            return;
+        }
         if (manager.cityPrefab != null)
         {
-            string civName = GetCivName(manager);
             bool isCapital = manager.allCities.Find(c => c != null && c.ownerCivName == civName) == null;
             string generatedName = CityLabel.GenerateCityName(civName, isCapital);
 
@@ -138,8 +185,8 @@ public class Unit : MonoBehaviour
             
             manager.RegisterCity(city);
 
-            FogOfWarManager fog = manager.GetFogOfWar();
-            if (fog != null) fog.RevealAllPlayerUnits();
+            if (isPlayer)
+                SaveManager.Instance?.MarkUnsaved();
 
             Debug.Log(name + " заснував місто " + generatedName + " (" + civName + ")");
             
@@ -155,12 +202,15 @@ public class Unit : MonoBehaviour
     
     public string GetCivName(Program1 manager = null)
     {
+        if (!string.IsNullOrEmpty(ownerCivName))
+            return ownerCivName;
+
         if (isPlayer)
         {
             if (manager == null) manager = Object.FindAnyObjectByType<Program1>();
             if (manager != null && !string.IsNullOrEmpty(manager.currentCivName))
                 return manager.currentCivName;
-            return "Rome";
+            return PlayerPrefs.GetString("SelectedCiv", "Rome");
         }
 
         if (name.Contains("Rome")) return "Rome";
@@ -188,20 +238,8 @@ public class Unit : MonoBehaviour
                 }
             }
         }
-        
-        // Перевіряємо відстань до інших міст
-        float minDistance = float.MaxValue;
-        foreach (City city in manager.allCities)
-        {
-            if (city != null)
-            {
-                float distance = Vector3Int.Distance(pos, city.gridPosition);
-                minDistance = Mathf.Min(minDistance, distance);
-            }
-        }
-        
-        // Місце хороше якщо є ресурси і не занадто близько до інших міст
-        return resourceCount >= 5 && minDistance >= 3;
+
+        return resourceCount >= 5 && manager.IsFarEnoughFromCities(pos);
     }
 
     // Метод для перевірки чи є юніти ворогами
@@ -221,11 +259,10 @@ public class Unit : MonoBehaviour
         if (otherUnit.isPlayer)
         {
             if (manager == null) manager = Object.FindAnyObjectByType<Program1>();
-            string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
-            return diplomacy.IsAtWarWith(GetCivName(manager));
+            return diplomacy.AreAtWar(GetCivName(manager), manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome"));
         }
 
-        return false;
+        return diplomacy.AreAtWar(GetCivName(manager), otherCiv);
     }
 
     public IEnumerator JumpAttack(Unit target, Program1 manager)
@@ -233,47 +270,64 @@ public class Unit : MonoBehaviour
         if (target == null || manager == null || manager.tilemap == null)
             yield break;
 
+        if (!CanAttackThisTurn())
+            yield break;
+
+        int damage = attackPower;
+        CombatSystem combat = Object.FindAnyObjectByType<CombatSystem>();
+        if (combat != null)
+            damage = combat.GetAttackDamage(this);
+
         Vector3 startPos = transform.position;
-        Vector3 targetCellPos = manager.tilemap.GetCellCenterWorld(target.gridPosition);
-        targetCellPos.y -= 1f;
-        targetCellPos.z = -0.1f;
+        Vector3 targetCellPos = manager.GetUnitPositionForCell(target.gridPosition);
 
         UnitAnimator anim = GetComponent<UnitAnimator>();
+        bool targetDestroyed = false;
         if (anim != null)
         {
             anim.FaceToward(targetCellPos - transform.position);
             target.lastAttacker = this;
-            yield return StartCoroutine(anim.PlayAttackRoutine(target, attackPower));
-            yield break;
+            yield return StartCoroutine(anim.PlayAttackRoutine(target, damage));
+            hasAttackedThisTurn = true;
+            targetDestroyed = target == null || target.health <= 0;
         }
-
-        Vector3 attackPos = Vector3.Lerp(startPos, targetCellPos, 0.6f);
-        float forwardDuration = 0.12f;
-        float backDuration = 0.10f;
-        float jumpHeight = 0.22f;
-
-        for (float t = 0f; t < forwardDuration; t += Time.deltaTime)
+        else
         {
-            float k = t / forwardDuration;
-            Vector3 p = Vector3.Lerp(startPos, attackPos, k);
-            p.y += Mathf.Sin(k * Mathf.PI) * jumpHeight;
-            transform.position = p;
-            yield return null;
+            Vector3 attackPos = Vector3.Lerp(startPos, targetCellPos, 0.6f);
+            float forwardDuration = 0.12f;
+            float backDuration = 0.10f;
+            float jumpHeight = 0.22f;
+
+            for (float t = 0f; t < forwardDuration; t += Time.deltaTime)
+            {
+                float k = t / forwardDuration;
+                Vector3 p = Vector3.Lerp(startPos, attackPos, k);
+                p.y += Mathf.Sin(k * Mathf.PI) * jumpHeight;
+                transform.position = p;
+                yield return null;
+            }
+
+            transform.position = attackPos;
+            target.TakeDamage(damage, this);
+            hasAttackedThisTurn = true;
+            targetDestroyed = target == null || target.IsDead;
+
+            for (float t = 0f; t < backDuration; t += Time.deltaTime)
+            {
+                float k = t / backDuration;
+                Vector3 p = Vector3.Lerp(attackPos, startPos, k);
+                p.y += Mathf.Sin((1f - k) * Mathf.PI) * jumpHeight * 0.5f;
+                transform.position = p;
+                yield return null;
+            }
+
+            transform.position = startPos;
         }
 
-        transform.position = attackPos;
-        target.TakeDamage(attackPower, this);
+        if (targetDestroyed && target != null)
+            combat?.NotifyUnitDestroyed(this, target);
 
-        for (float t = 0f; t < backDuration; t += Time.deltaTime)
-        {
-            float k = t / backDuration;
-            Vector3 p = Vector3.Lerp(attackPos, startPos, k);
-            p.y += Mathf.Sin((1f - k) * Mathf.PI) * jumpHeight * 0.5f;
-            transform.position = p;
-            yield return null;
-        }
-
-        transform.position = startPos;
+        currentMovement = 0;
     }
 
     public IEnumerator MoveAlongPath(List<Vector3Int> path, Tilemap tilemap, Program1 manager)
@@ -293,23 +347,26 @@ public class Unit : MonoBehaviour
                 yield break;
             }
 
+            if (manager.IsBlockedByPeacefulEnemyCity(cell, this))
+            {
+                Debug.Log("Занадто близько до чужого міста — спочатку оголосіть війну.");
+                break;
+            }
+
             // Блокуємо вхід на зайняту клітинку.
             // Виняток: якщо там ворог і є війна — виконуємо атаку.
             Unit occupant = manager.GetUnitAt(cell);
             if (occupant != null && occupant != this)
             {
-                if (occupant.isPlayer != this.isPlayer)
+                if (manager.CanUnitsFight(this, occupant))
                 {
-                    if (AreEnemies(occupant, manager))
-                    {
-                        yield return StartCoroutine(JumpAttack(occupant, manager));
-                        currentMovement = 0;
-                        break;
-                    }
-
-                    Debug.Log("Неможливо атакувати — війну не оголошено проти " + occupant.GetCivName(manager));
+                    yield return StartCoroutine(JumpAttack(occupant, manager));
+                    currentMovement = 0;
                     break;
                 }
+
+                if (occupant.isPlayer != this.isPlayer)
+                    Debug.Log("Неможливо атакувати — війну не оголошено проти " + occupant.GetCivName(manager));
 
                 break;
             }
@@ -317,13 +374,11 @@ public class Unit : MonoBehaviour
             int cost = manager.GetMovementCost(cell);
             if (currentMovement < cost) break;
 
-            Vector3 targetPos = tilemap.GetCellCenterWorld(cell);
+            Vector3 targetPos = manager.GetUnitPositionForCell(cell);
 
-            // Зберігаємо твою логіку позиціонування y - 1f
-            targetPos.y -= 1f;
-            targetPos.z = -0.1f;
+            if (anim != null)
+                anim.FaceToward(targetPos - transform.position);
 
-            // Додаємо тайм-аут для запобігання безкінечних циклів
             float timeout = 2f;
             float elapsed = 0f;
 
@@ -343,20 +398,24 @@ public class Unit : MonoBehaviour
             }
 
             transform.position = targetPos;
+            Vector3Int oldCell = gridPosition;
             gridPosition = cell;
+            manager.UpdateUnitCellIndex(this, oldCell, cell);
             currentMovement -= cost;
+
+            City cityOnCell = manager.GetCityAt(cell);
+            if (cityOnCell != null && manager.CanAttackCity(this, cityOnCell))
+            {
+                yield return manager.StartCoroutine(manager.CaptureCityRoutine(this, cityOnCell));
+                yield break;
+            }
+
+            if (isPlayer)
+                hasScoutedFog = true;
 
             FogOfWarManager fog = manager.GetFogOfWar();
             if (fog != null)
                 fog.OnUnitMoved(this);
-
-            if (isPlayer && FogOfWarManager.Instance != null)
-            {
-                int sight = UnitTypeHelper.GetKind(this) == UnitTypeHelper.UnitKind.Scout
-                    ? FogOfWarManager.Instance.scoutSightRange
-                    : FogOfWarManager.Instance.defaultSightRange;
-                FogOfWarManager.Instance.RevealAround(cell, sight);
-            }
 
             // Дуже мала затримка для плавності руху
             yield return new WaitForSeconds(0.02f);
@@ -388,6 +447,6 @@ public class Unit : MonoBehaviour
         }
 
         // Завжди зупиняємо анімацію після завершення руху
-        if (anim != null) anim.PlayIdle();
+        if (anim != null) anim.ForceIdle();
     }
 }

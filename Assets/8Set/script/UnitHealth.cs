@@ -17,7 +17,8 @@ public class UnitHealth : MonoBehaviour
     void Start()
     {
         unit = GetComponent<Unit>();
-        currentHealth = maxHealth;
+        if (currentHealth <= 0)
+            currentHealth = maxHealth;
         
         if (showHealthBar && healthBarPrefab != null)
         {
@@ -59,8 +60,6 @@ public class UnitHealth : MonoBehaviour
         {
             healthBar.SetActive(true);
         }
-        
-        Debug.Log($"{unit.name} отримав {damage} пошкоджень. Залишилось здоров'я: {currentHealth}/{maxHealth}");
     }
     
     public void Heal(int amount)
@@ -71,8 +70,6 @@ public class UnitHealth : MonoBehaviour
         {
             healthSlider.value = currentHealth;
         }
-        
-        Debug.Log($"{unit.name} вилікувано на {amount}. Поточне здоров'я: {currentHealth}/{maxHealth}");
     }
     
     public bool IsDead()

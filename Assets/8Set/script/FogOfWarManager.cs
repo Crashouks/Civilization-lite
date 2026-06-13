@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -6,20 +7,27 @@ public class FogOfWarManager : MonoBehaviour
     public static FogOfWarManager Instance { get; private set; }
 
     [Header("Налаштування")]
-    public bool enableFogOfWar = false;
-    public int defaultSightRange = 3;
-    public int scoutSightRange = 4;
+    public bool enableFogOfWar = true;
+    public int warriorSightRange = 1;
+    public int scoutSightRange = 2;
     public int citySightRange = 2;
 
-    private bool[,] explored;
-    private bool[,] visible;
-    private int mapWidth;
-    private int mapHeight;
+    bool[,] explored;
+    bool[,] visible;
+    int mapWidth;
+    int mapHeight;
+    byte[,] overlayState;
+    const byte OverlayNone = 255;
+    const byte OverlayHidden = 0;
+    const byte OverlayShrouded = 1;
+    const byte OverlayVisible = 2;
 
-    private Tilemap fogTilemap;
-    private Tile unexploredTile;
-    private Tile exploredTile;
-    private Program1 program;
+    Tilemap fogTilemap;
+    Tile unexploredTile;
+    Tile exploredTile;
+    Program1 program;
+    static readonly Color HiddenTerrainColor = Color.black;
+    static readonly Color ShroudedTerrainColor = new Color(0.14f, 0.14f, 0.16f, 1f);
 
     void Awake()
     {
@@ -34,14 +42,24 @@ public class FogOfWarManager : MonoBehaviour
     public void Initialize(Program1 manager)
     {
         program = manager;
-        if (manager == null) return;
+        if (manager == null)
+            return;
+
+        enableFogOfWar = true;
+        warriorSightRange = Mathf.Max(1, warriorSightRange);
+        scoutSightRange = Mathf.Max(warriorSightRange + 1, scoutSightRange);
 
         mapWidth = manager.width;
         mapHeight = manager.height;
         explored = new bool[mapWidth, mapHeight];
         visible = new bool[mapWidth, mapHeight];
+        overlayState = new byte[mapWidth, mapHeight];
+        for (int x = 0; x < mapWidth; x++)
+            for (int y = 0; y < mapHeight; y++)
+                overlayState[x, y] = OverlayNone;
 
-        if (!enableFogOfWar) return;
+        if (!enableFogOfWar)
+            return;
 
         CreateFogOverlay(manager);
         RefreshVisibility();
@@ -49,7 +67,8 @@ public class FogOfWarManager : MonoBehaviour
 
     void CreateFogOverlay(Program1 manager)
     {
-        if (manager.grid == null) return;
+        if (manager.grid == null || manager.tilemap == null)
+            return;
 
         if (fogTilemap != null)
             Destroy(fogTilemap.gameObject);
@@ -58,63 +77,125 @@ public class FogOfWarManager : MonoBehaviour
         fogObj.transform.SetParent(manager.grid.transform, false);
 
         fogTilemap = fogObj.AddComponent<Tilemap>();
-        TilemapRenderer renderer = fogObj.AddComponent<TilemapRenderer>();
-        renderer.sortingOrder = 100;
+        fogTilemap.tileAnchor = manager.tilemap.tileAnchor;
+        fogTilemap.orientation = manager.tilemap.orientation;
 
-        unexploredTile = CreateFogTile(new Color(0.02f, 0.02f, 0.05f, 0.95f));
-        exploredTile = CreateFogTile(new Color(0.05f, 0.05f, 0.1f, 0.55f));
+        TilemapRenderer terrainRenderer = manager.tilemap.GetComponent<TilemapRenderer>();
+        TilemapRenderer renderer = fogObj.AddComponent<TilemapRenderer>();
+        int terrainOrder = terrainRenderer != null ? terrainRenderer.sortingOrder : 0;
+        renderer.sortingOrder = terrainOrder + 6;
+        renderer.sortingLayerID = terrainRenderer != null ? terrainRenderer.sortingLayerID : 0;
+        if (terrainRenderer != null && terrainRenderer.sharedMaterial != null)
+            renderer.sharedMaterial = terrainRenderer.sharedMaterial;
+
+        Tile referenceTile = manager.GetFogReferenceTile();
+        unexploredTile = CreateHexFogTile(referenceTile, Color.black);
+        exploredTile = CreateHexFogTile(referenceTile, new Color(0.06f, 0.06f, 0.08f, 0.92f));
     }
 
-    Tile CreateFogTile(Color color)
+    Tile CreateHexFogTile(Tile referenceTile, Color tint)
     {
-        Texture2D tex = new Texture2D(4, 4);
-        Color[] pixels = new Color[16];
-        for (int i = 0; i < pixels.Length; i++) pixels[i] = color;
-        tex.SetPixels(pixels);
-        tex.Apply();
-        tex.filterMode = FilterMode.Point;
-
-        Sprite sprite = Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f), 4f);
         Tile tile = ScriptableObject.CreateInstance<Tile>();
-        tile.sprite = sprite;
-        tile.color = Color.white;
+        tile.colliderType = Tile.ColliderType.None;
+        tile.color = tint;
+
+        if (referenceTile != null && referenceTile.sprite != null)
+        {
+            tile.sprite = referenceTile.sprite;
+            tile.transform = referenceTile.transform;
+            return tile;
+        }
+
+        tile.sprite = CreateFallbackHexSprite(new Color(tint.r, tint.g, tint.b, 1f));
         return tile;
+    }
+
+    Sprite CreateFallbackHexSprite(Color color, float radiusScale = 0.52f)
+    {
+        const int size = 256;
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 center = new Vector2(size * 0.5f, size * 0.5f);
+        float radius = size * radiusScale;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                bool inside = IsInsidePointyHex(x + 0.5f, y + 0.5f, center, radius);
+                tex.SetPixel(x, y, inside ? color : Color.clear);
+            }
+        }
+
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    static bool IsInsidePointyHex(float x, float y, Vector2 center, float radius)
+    {
+        float dx = Mathf.Abs(x - center.x) / radius;
+        float dy = Mathf.Abs(y - center.y) / radius;
+        return dy <= 0.866f && dy <= 0.866f - dx * 0.5f && dx <= 1f;
     }
 
     public void RevealAllPlayerUnits()
     {
-        if (program == null) program = Object.FindAnyObjectByType<Program1>();
-        if (program == null) return;
-
-        foreach (Unit unit in program.allUnits)
-        {
-            if (unit != null && unit.isPlayer)
-                RevealAround(unit.gridPosition, GetSightRange(unit));
-        }
-
-        foreach (City city in program.allCities)
-        {
-            if (city != null && city.isPlayerCity)
-                RevealAround(city.gridPosition, citySightRange);
-        }
-
-        if (enableFogOfWar)
-        {
-            UpdateOverlay();
-            UpdateEntityVisibility();
-        }
+        RefreshVisibility();
     }
 
     public void OnUnitMoved(Unit unit)
     {
-        if (!enableFogOfWar || unit == null || !unit.isPlayer) return;
-        RevealAround(unit.gridPosition, GetSightRange(unit));
+        if (!enableFogOfWar || unit == null)
+            return;
+
+        if (program == null)
+            program = Object.FindAnyObjectByType<Program1>();
+
+        if (program == null)
+            return;
+
+        if (unit.isPlayer)
+        {
+            Vector3Int cell = unit.gridPosition;
+            cell.z = 0;
+            MarkExploredAround(cell, GetSightRange(unit));
+            RefreshVisibility();
+            return;
+        }
+
+        if (enableFogOfWar)
+            UpdateEntityVisibility();
+    }
+
+    void MarkExploredAround(Vector3Int center, int range)
+    {
+        if (explored == null || program == null)
+            return;
+
+        center.z = 0;
+        if (!program.IsValidMapCell(center))
+            center = program.ResolveMapCell(center, program.tilemap.GetCellCenterWorld(center));
+
+        foreach (Vector3Int cell in GetCellsInRange(center, range))
+            SetCellExplored(cell);
+    }
+
+    void SetCellExplored(Vector3Int cell)
+    {
+        if (!IsInBounds(cell))
+            return;
+
+        explored[cell.x, cell.y] = true;
     }
 
     public void RefreshVisibility()
     {
-        if (program == null) program = Object.FindAnyObjectByType<Program1>();
-        if (visible == null || program == null) return;
+        if (program == null)
+            program = Object.FindAnyObjectByType<Program1>();
+        if (visible == null || explored == null || program == null)
+            return;
 
         for (int x = 0; x < mapWidth; x++)
             for (int y = 0; y < mapHeight; y++)
@@ -122,14 +203,22 @@ public class FogOfWarManager : MonoBehaviour
 
         foreach (Unit unit in program.allUnits)
         {
-            if (unit == null || !unit.isPlayer) continue;
-            RevealAround(unit.gridPosition, GetSightRange(unit));
+            if (unit == null || !unit.isPlayer)
+                continue;
+
+            Vector3Int cell = unit.gridPosition;
+            cell.z = 0;
+            MarkVisibleAround(cell, GetSightRange(unit));
         }
 
         foreach (City city in program.allCities)
         {
-            if (city == null || !city.isPlayerCity) continue;
-            RevealAround(city.gridPosition, citySightRange);
+            if (city == null || !city.IsOwnedByPlayer())
+                continue;
+
+            Vector3Int cell = city.gridPosition;
+            cell.z = 0;
+            MarkVisibleAround(cell, citySightRange);
         }
 
         if (enableFogOfWar)
@@ -141,19 +230,10 @@ public class FogOfWarManager : MonoBehaviour
 
     public void RevealAround(Vector3Int center, int range)
     {
-        if (explored == null || visible == null) return;
+        if (explored == null || visible == null)
+            return;
 
-        for (int x = center.x - range; x <= center.x + range; x++)
-        {
-            for (int y = center.y - range; y <= center.y + range; y++)
-            {
-                if (x < 0 || y < 0 || x >= mapWidth || y >= mapHeight) continue;
-                if (HexDistance(center, new Vector3Int(x, y, 0)) > range) continue;
-
-                explored[x, y] = true;
-                visible[x, y] = true;
-            }
-        }
+        MarkVisibleAround(center, range);
 
         if (enableFogOfWar)
         {
@@ -162,88 +242,192 @@ public class FogOfWarManager : MonoBehaviour
         }
     }
 
-    int GetSightRange(Unit unit)
+    void MarkVisibleAround(Vector3Int center, int range)
     {
-        if (unit != null && UnitTypeHelper.GetKind(unit) == UnitTypeHelper.UnitKind.Scout)
-            return scoutSightRange;
-        return defaultSightRange;
+        if (explored == null || visible == null || program == null)
+            return;
+
+        center.z = 0;
+        if (!program.IsValidMapCell(center))
+            center = program.ResolveMapCell(center, program.tilemap.GetCellCenterWorld(center));
+
+        foreach (Vector3Int cell in GetCellsInRange(center, range))
+            SetCellExploredAndVisible(cell);
     }
 
-    int HexDistance(Vector3Int a, Vector3Int b)
+    void SetCellExploredAndVisible(Vector3Int cell)
     {
-        int dx = Mathf.Abs(a.x - b.x);
-        int dy = Mathf.Abs(a.y - b.y);
-        return Mathf.Max(dx, dy);
+        if (!IsInBounds(cell))
+            return;
+
+        explored[cell.x, cell.y] = true;
+        visible[cell.x, cell.y] = true;
+    }
+
+    IEnumerable<Vector3Int> GetCellsInRange(Vector3Int center, int range)
+    {
+        if (program == null || range < 0)
+            yield break;
+
+        center.z = 0;
+        var visited = new HashSet<Vector3Int>();
+        var queue = new Queue<(Vector3Int cell, int dist)>();
+        queue.Enqueue((center, 0));
+        visited.Add(center);
+
+        while (queue.Count > 0)
+        {
+            (Vector3Int cell, int dist) item = queue.Dequeue();
+
+            if (program.IsValidMapCell(item.cell))
+                yield return item.cell;
+
+            if (item.dist >= range)
+                continue;
+
+            foreach (Vector3Int neighbor in program.GetNeighborCells(item.cell))
+            {
+                Vector3Int next = neighbor;
+                next.z = 0;
+                if (visited.Contains(next))
+                    continue;
+
+                visited.Add(next);
+                queue.Enqueue((next, item.dist + 1));
+            }
+        }
+    }
+
+    bool IsInBounds(Vector3Int cell)
+    {
+        return cell.x >= 0 && cell.y >= 0 && cell.x < mapWidth && cell.y < mapHeight;
+    }
+
+    int GetSightRange(Unit unit)
+    {
+        if (unit == null)
+            return warriorSightRange;
+
+        UnitTypeHelper.UnitKind kind = UnitTypeHelper.GetKind(unit);
+        if (kind == UnitTypeHelper.UnitKind.Scout || kind == UnitTypeHelper.UnitKind.Settler)
+            return scoutSightRange;
+
+        return warriorSightRange;
+    }
+
+    public void OnCityRegistered(City city)
+    {
+        if (!enableFogOfWar || city == null || program == null || !city.IsOwnedByPlayer())
+            return;
+
+        Vector3Int cell = program.ResolveCityCell(city);
+        MarkVisibleAround(cell, citySightRange);
+        RefreshVisibility();
     }
 
     public bool IsVisible(Vector3Int cell)
     {
-        if (!enableFogOfWar || visible == null) return true;
-        if (cell.x < 0 || cell.y < 0 || cell.x >= mapWidth || cell.y >= mapHeight) return false;
+        if (!enableFogOfWar || visible == null)
+            return true;
+        if (!IsInBounds(cell))
+            return false;
         return visible[cell.x, cell.y];
     }
 
     public bool IsExplored(Vector3Int cell)
     {
-        if (!enableFogOfWar || explored == null) return true;
-        if (cell.x < 0 || cell.y < 0 || cell.x >= mapWidth || cell.y >= mapHeight) return false;
+        if (!enableFogOfWar || explored == null)
+            return true;
+        if (!IsInBounds(cell))
+            return false;
         return explored[cell.x, cell.y];
     }
 
     void UpdateOverlay()
     {
-        if (fogTilemap == null || explored == null || program == null) return;
+        if (fogTilemap == null || explored == null || program == null || program.tilemap == null || overlayState == null)
+            return;
 
-        fogTilemap.ClearAllTiles();
+        bool fogTilesDirty = false;
 
         for (int x = 0; x < mapWidth; x++)
         {
             for (int y = 0; y < mapHeight; y++)
             {
                 Vector3Int cell = new Vector3Int(x, y, 0);
-                if (!program.tilemap.HasTile(cell)) continue;
+                if (!program.tilemap.HasTile(cell))
+                    continue;
 
-                if (!explored[x, y])
+                byte state = !explored[x, y] ? OverlayHidden
+                    : !visible[x, y] ? OverlayShrouded
+                    : OverlayVisible;
+
+                if (overlayState[x, y] == state)
+                    continue;
+
+                overlayState[x, y] = state;
+
+                if (state == OverlayHidden)
+                {
+                    program.tilemap.SetColor(cell, HiddenTerrainColor);
                     fogTilemap.SetTile(cell, unexploredTile);
-                else if (!visible[x, y])
+                }
+                else if (state == OverlayShrouded)
+                {
+                    program.tilemap.SetColor(cell, ShroudedTerrainColor);
                     fogTilemap.SetTile(cell, exploredTile);
+                }
+                else
+                {
+                    program.tilemap.SetColor(cell, Color.white);
+                    fogTilemap.SetTile(cell, null);
+                }
+
+                fogTilesDirty = true;
             }
         }
+
+        if (fogTilesDirty)
+            fogTilemap.RefreshAllTiles();
     }
 
     void UpdateEntityVisibility()
     {
-        if (program == null) return;
+        if (program == null)
+            return;
 
         foreach (Unit unit in program.allUnits)
         {
-            if (unit == null) continue;
-            bool show = unit.isPlayer || IsVisible(unit.gridPosition);
-            SetObjectVisible(unit.gameObject, show);
+            if (unit == null)
+                continue;
+
+            Vector3Int cell = unit.gridPosition;
+            cell.z = 0;
+            if (unit.isPlayer)
+            {
+                unit.SetFogVisibility(true);
+                continue;
+            }
+
+            unit.SetFogVisibility(IsVisible(cell));
         }
 
         foreach (City city in program.allCities)
         {
-            if (city == null) continue;
-            bool show = city.isPlayerCity || IsVisible(city.gridPosition);
+            if (city == null)
+                continue;
+
+            Vector3Int cell = city.gridPosition;
+            cell.z = 0;
+            bool show = city.IsOwnedByPlayer() || IsVisible(cell);
             city.SetFogVisibility(show);
         }
     }
 
-    void SetObjectVisible(GameObject obj, bool visibleToPlayer)
-    {
-        if (obj == null) return;
-
-        foreach (SpriteRenderer sr in obj.GetComponentsInChildren<SpriteRenderer>(true))
-            sr.enabled = visibleToPlayer;
-
-        foreach (Collider2D col in obj.GetComponentsInChildren<Collider2D>(true))
-            col.enabled = visibleToPlayer;
-    }
-
     public bool[] ExportExploredFlat()
     {
-        if (explored == null) return null;
+        if (explored == null)
+            return null;
 
         bool[] flat = new bool[mapWidth * mapHeight];
         for (int x = 0; x < mapWidth; x++)
@@ -254,7 +438,8 @@ public class FogOfWarManager : MonoBehaviour
 
     public void ImportExploredFlat(bool[] flat)
     {
-        if (flat == null || explored == null) return;
+        if (flat == null || explored == null)
+            return;
 
         for (int x = 0; x < mapWidth; x++)
         {

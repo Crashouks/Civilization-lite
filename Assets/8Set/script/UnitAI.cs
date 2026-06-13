@@ -17,22 +17,48 @@ public class UnitAI : MonoBehaviour
     {
         selfUnit = GetComponent<Unit>();
         mapManager = Object.FindAnyObjectByType<Program1>();
-        civilizationAI = Object.FindAnyObjectByType<CivilizationAI>();
         combatSystem = Object.FindAnyObjectByType<CombatSystem>();
+        RefreshCivilizationAI();
+    }
+
+    void RefreshCivilizationAI()
+    {
+        if (selfUnit == null) selfUnit = GetComponent<Unit>();
+        if (mapManager == null) mapManager = Object.FindAnyObjectByType<Program1>();
+
+        string civName = selfUnit != null && mapManager != null
+            ? selfUnit.GetCivName(mapManager)
+            : null;
+
+        civilizationAI = FindCivilizationAIForCiv(civName);
+    }
+
+    static CivilizationAI FindCivilizationAIForCiv(string civName)
+    {
+        if (string.IsNullOrEmpty(civName)) return null;
+
+        foreach (CivilizationAI ai in Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None))
+        {
+            if (ai != null && ai.civilizationName == civName)
+                return ai;
+        }
+
+        return null;
+    }
+
+    int HexDist(Vector3Int a, Vector3Int b)
+    {
+        if (mapManager == null) mapManager = Object.FindAnyObjectByType<Program1>();
+        return mapManager != null
+            ? mapManager.GetHexDistance(a, b)
+            : Mathf.Max(Mathf.Abs(a.x - b.x), Mathf.Abs(a.y - b.y));
     }
 
     public IEnumerator TakeTurn()
     {
-        Debug.Log($"=== AI ХІД ПОЧАВСЯ: {selfUnit.name} ===");
-        
-        // Аналізуємо ситуацію
+        RefreshCivilizationAI();
         AISituation situation = AnalyzeSituation();
-        Debug.Log($"Ситуація: {situation.currentTask}");
-        
-        // Приймаємо рішення на основі ситуації
         yield return StartCoroutine(ExecuteDecision(situation));
-        
-        Debug.Log($"=== AI ХІД ЗАВЕРШЕНО: {selfUnit.name} ===");
     }
 
     Unit FindNearestPlayer()
@@ -45,7 +71,7 @@ public class UnitAI : MonoBehaviour
         {
             if (u != null && u != selfUnit && u.isPlayer != selfUnit.isPlayer)
             {
-                float distance = Vector3Int.Distance(selfUnit.gridPosition, u.gridPosition);
+                float distance = HexDist(selfUnit.gridPosition, u.gridPosition);
                 if (distance < minDistance)
                 {
                     minDistance = distance;
@@ -310,7 +336,7 @@ public class UnitAI : MonoBehaviour
         {
             if (u != null && u != selfUnit && u.isPlayer != selfUnit.isPlayer)
             {
-                int distance = (int)Vector3Int.Distance(selfUnit.gridPosition, u.gridPosition);
+                int distance = HexDist(selfUnit.gridPosition, u.gridPosition);
                 if (distance <= range)
                 {
                     enemies.Add(u);
@@ -319,7 +345,7 @@ public class UnitAI : MonoBehaviour
         }
         
         // Сортуємо за відстанню
-        enemies.Sort((a, b) => Vector3Int.Distance(selfUnit.gridPosition, a.gridPosition).CompareTo(Vector3Int.Distance(selfUnit.gridPosition, b.gridPosition)));
+        enemies.Sort((a, b) => HexDist(selfUnit.gridPosition, a.gridPosition).CompareTo(HexDist(selfUnit.gridPosition, b.gridPosition)));
         return enemies;
     }
     
@@ -332,7 +358,7 @@ public class UnitAI : MonoBehaviour
         {
             if (u != null && u != selfUnit && u.isPlayer == selfUnit.isPlayer)
             {
-                int distance = (int)Vector3Int.Distance(selfUnit.gridPosition, u.gridPosition);
+                int distance = HexDist(selfUnit.gridPosition, u.gridPosition);
                 if (distance <= range)
                 {
                     allies.Add(u);
@@ -367,7 +393,7 @@ public class UnitAI : MonoBehaviour
         {
             if (u != null && u != selfUnit && u.isPlayer != selfUnit.isPlayer)
             {
-                float distance = Vector3Int.Distance(selfUnit.gridPosition, u.gridPosition);
+                float distance = HexDist(selfUnit.gridPosition, u.gridPosition);
                 if (distance < minDistance)
                 {
                     minDistance = distance;
@@ -479,7 +505,7 @@ public class UnitAI : MonoBehaviour
         if (candidates.Count > 0)
         {
             // Вибираємо найдалішу точку для кращої розвідки
-            candidates.Sort((a, b) => Vector3Int.Distance(selfUnit.gridPosition, a).CompareTo(Vector3Int.Distance(selfUnit.gridPosition, b)));
+            candidates.Sort((a, b) => HexDist(selfUnit.gridPosition, a).CompareTo(HexDist(selfUnit.gridPosition, b)));
             return candidates[candidates.Count - 1]; // Найдаліша
         }
         
@@ -515,17 +541,22 @@ public class UnitAI : MonoBehaviour
 
     bool CheckIfAtWarWithPlayer()
     {
-        if (civilizationAI == null) return false;
+        RefreshCivilizationAI();
 
         DiplomacyManager diplomacy = Object.FindAnyObjectByType<DiplomacyManager>();
         if (diplomacy != null)
         {
             Program1 playerManager = Object.FindAnyObjectByType<Program1>();
             string playerName = playerManager != null ? playerManager.currentCivName : "Player";
-            return diplomacy.IsAtWar(civilizationAI.civilizationName, playerName);
+            string aiCiv = civilizationAI != null
+                ? civilizationAI.civilizationName
+                : (selfUnit != null && playerManager != null ? selfUnit.GetCivName(playerManager) : null);
+
+            if (!string.IsNullOrEmpty(aiCiv))
+                return diplomacy.IsAtWar(aiCiv, playerName);
         }
 
-        return civilizationAI.isAtWar;
+        return civilizationAI != null && civilizationAI.isAtWar;
     }
 }
 

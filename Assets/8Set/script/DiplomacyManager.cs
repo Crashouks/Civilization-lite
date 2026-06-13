@@ -8,7 +8,13 @@ public class DiplomacyManager : MonoBehaviour
     
     public bool isAtWar = false;
     public List<string> enemyNations = new List<string>();
-    
+
+    readonly HashSet<string> activeWarPairs = new HashSet<string>();
+    readonly HashSet<string> eliminatedCivs = new HashSet<string>();
+
+    [Header("AI дипломатія")]
+    public float aiVsAiWarChance = 0.12f;
+
     [Header("Налаштування AI цивілізацій")]
     public GameObject[] civPrefabs; // Префаби для різних цивілізацій
     public Dictionary<string, Color> civColors = new Dictionary<string, Color>(); // Кольори для кожної цивілізації
@@ -16,6 +22,8 @@ public class DiplomacyManager : MonoBehaviour
     
     [Header("Стартові позиції AI")]
     public Vector3Int[] aiSpawnPositions = new Vector3Int[3]; // 3 позиції для AI
+
+    public bool AiSpawnComplete { get; private set; }
 
     void Awake()
     {
@@ -56,13 +64,13 @@ public class DiplomacyManager : MonoBehaviour
 
         if (SaveManager.LoadedFromSaveThisSession)
         {
-            Debug.Log("Пропускаємо спавн AI — гра завантажена зі збереження");
+            AiSpawnComplete = true;
             yield break;
         }
 
         if (manager == null)
         {
-            Debug.LogError("Program1 не знайдено для спавну AI!");
+            AiSpawnComplete = true;
             yield break;
         }
         
@@ -89,9 +97,10 @@ public class DiplomacyManager : MonoBehaviour
         
         Debug.Log("Спавнено " + aiIndex + " AI цивілізацій в мирному режимі");
 
-        // ВИМКНЕНО - AI тепер керується через кнопку "Наступний хід" в Program1
-        // yield return new WaitForSeconds(1f);
-        // StartCoroutine(AITakeTurn());
+        if (FogOfWarManager.Instance != null)
+            FogOfWarManager.Instance.RefreshVisibility();
+
+        AiSpawnComplete = true;
     }
     
     public Color GetCivColor(string civName)
@@ -164,7 +173,7 @@ public class DiplomacyManager : MonoBehaviour
             Debug.Log("Створено AI цивілізацію " + civName + " з поселенцем та воїном");
 
             // Створюємо CivilizationAI контролер для цієї цивілізації
-            CreateCivilizationAI(civName, civColor);
+            CreateCivilizationAI(civName, civColor, manager);
         }
         else
         {
@@ -172,7 +181,7 @@ public class DiplomacyManager : MonoBehaviour
         }
     }
 
-    void CreateCivilizationAI(string civName, Color civColor)
+    public void CreateCivilizationAI(string civName, Color civColor, Program1 manager = null)
     {
         // Перевіряємо чи вже існує CivilizationAI для цієї цивілізації
         CivilizationAI[] existingAIs = Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None);
@@ -180,6 +189,8 @@ public class DiplomacyManager : MonoBehaviour
         {
             if (existingAI != null && existingAI.civilizationName == civName)
             {
+                if (manager != null)
+                    existingAI.BindToManager(manager);
                 Debug.Log($"CivilizationAI для {civName} вже існує");
                 return;
             }
@@ -189,14 +200,15 @@ public class DiplomacyManager : MonoBehaviour
         GameObject aiObj = new GameObject(civName + "_AI");
         CivilizationAI newAI = aiObj.AddComponent<CivilizationAI>();
         newAI.SetCivilizationName(civName);
+        if (manager != null)
+            newAI.BindToManager(manager);
         Debug.Log($"Створено CivilizationAI для {civName}");
     }
     
     Vector3Int FindAISpawnPosition(int index, Program1 manager)
     {
-        // Розміщуємо AI цивілізації в різних кутках карти
-        int width = 80;
-        int height = 50;
+        int width = manager != null ? manager.width : 80;
+        int height = manager != null ? manager.height : 50;
         
         Vector3Int[] corners = {
             new Vector3Int(5, 5, 0),           // Верхній лівий
@@ -236,7 +248,7 @@ public class DiplomacyManager : MonoBehaviour
         if (manager == null) return Vector3Int.zero;
 
         // Спочатку пробуємо сам центр.
-        if (!manager.IsImpassable(center) && manager.GetUnitAt(center) == null && !manager.HasCityAt(center))
+        if (!manager.IsImpassable(center) && manager.GetUnitAt(center) == null && manager.IsValidCitySite(center))
         {
             return center;
         }
@@ -252,7 +264,7 @@ public class DiplomacyManager : MonoBehaviour
                     if (checkPos.x < 0 || checkPos.x >= manager.width || checkPos.y < 0 || checkPos.y >= manager.height)
                         continue;
 
-                    if (!manager.IsImpassable(checkPos) && manager.GetUnitAt(checkPos) == null && !manager.HasCityAt(checkPos))
+                    if (!manager.IsImpassable(checkPos) && manager.GetUnitAt(checkPos) == null && manager.IsValidCitySite(checkPos))
                     {
                         return checkPos;
                     }
@@ -315,7 +327,8 @@ public class DiplomacyManager : MonoBehaviour
         manager.RegisterCity(city);
 
         FogOfWarManager fog = manager.GetFogOfWar();
-        if (fog != null) fog.RevealAllPlayerUnits();
+        if (fog != null)
+            fog.RefreshVisibility();
     }
     
     GameObject CreateAIUnit(GameObject prefab, Vector3Int cellPos, string name, Color color, bool isPlayer)
@@ -347,8 +360,6 @@ public class DiplomacyManager : MonoBehaviour
             {
                 collider.size = new Vector2(1f, 1f);
             }
-            
-            Debug.Log("Додано колайдер до AI юніта: " + name);
         }
         
         // Додаємо AI компонент
@@ -362,8 +373,7 @@ public class DiplomacyManager : MonoBehaviour
         
         // Додаємо до списку всіх юнітів
         manager.allUnits.Add(u);
-        
-        Debug.Log("Створено AI юніт: " + name + " на позиції " + cellPos + " з анімаціями");
+        manager.RegisterUnitCell(u, cellPos);
         
         return obj; // Повертаємо створений об'єкт
     }
@@ -380,17 +390,211 @@ public class DiplomacyManager : MonoBehaviour
             return;
         }
 
-        if (!enemyNations.Contains(targetCiv))
-            enemyNations.Add(targetCiv);
-
-        isAtWar = enemyNations.Count > 0;
-        Debug.Log("Війна оголошена проти: " + targetCiv);
+        string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+        DeclareWarBetween(playerCiv, targetCiv, playerCiv);
 
         if (manager != null)
         {
-            manager.isAtWar = isAtWar;
             manager.pendingWarTargetCiv = "";
             manager.HideWarButton();
+        }
+    }
+
+    public void DeclareWarBetween(string civA, string civB, string aggressorCiv = null)
+    {
+        if (string.IsNullOrEmpty(civA) || string.IsNullOrEmpty(civB) || civA == civB)
+            return;
+
+        if (eliminatedCivs.Contains(civA) || eliminatedCivs.Contains(civB))
+            return;
+
+        string warKey = MakeWarKey(civA, civB);
+        if (activeWarPairs.Contains(warKey))
+            return;
+
+        activeWarPairs.Add(warKey);
+
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+
+        if (civA == playerCiv && !enemyNations.Contains(civB))
+            enemyNations.Add(civB);
+        if (civB == playerCiv && !enemyNations.Contains(civA))
+            enemyNations.Add(civA);
+
+        SyncWarFlags(manager);
+        Debug.Log("Війна: " + civA + " проти " + civB);
+
+        if (civA == playerCiv || civB == playerCiv)
+            SaveManager.Instance?.MarkUnsaved();
+
+        if (aggressorCiv != null && aggressorCiv != playerCiv && manager != null)
+        {
+            if (civA == playerCiv || civB == playerCiv)
+            {
+                if (GameUI.Instance != null)
+                    GameUI.Instance.ShowWarDeclaredBy(aggressorCiv);
+            }
+        }
+    }
+
+    static string MakeWarKey(string civA, string civB)
+    {
+        return string.CompareOrdinal(civA, civB) < 0 ? civA + "|" + civB : civB + "|" + civA;
+    }
+
+    void SyncWarFlags(Program1 manager)
+    {
+        isAtWar = enemyNations.Count > 0;
+        if (manager != null)
+            manager.isAtWar = isAtWar;
+    }
+
+    public bool AreAtWar(string civA, string civB)
+    {
+        if (string.IsNullOrEmpty(civA) || string.IsNullOrEmpty(civB) || civA == civB)
+            return false;
+
+        return activeWarPairs.Contains(MakeWarKey(civA, civB));
+    }
+
+    public bool IsCivAtWar(string civName, Program1 manager)
+    {
+        if (string.IsNullOrEmpty(civName) || manager == null)
+            return false;
+
+        string playerCiv = manager.currentCivName;
+        if (AreAtWar(civName, playerCiv))
+            return true;
+
+        foreach (string other in manager.GetLivingCivNames())
+        {
+            if (other == civName)
+                continue;
+
+            if (AreAtWar(civName, other))
+                return true;
+        }
+
+        return false;
+    }
+
+    public bool IsCivEliminated(string civName)
+    {
+        return !string.IsNullOrEmpty(civName) && eliminatedCivs.Contains(civName);
+    }
+
+    public bool IsCivEngagedInWar(string civName, Program1 manager)
+    {
+        if (string.IsNullOrEmpty(civName) || manager == null)
+            return false;
+
+        foreach (string other in manager.GetLivingCivNames())
+        {
+            if (other == civName)
+                continue;
+
+            if (AreAtWar(civName, other))
+                return true;
+        }
+
+        return false;
+    }
+
+    public bool CanAiDeclareNewWar(string civName, Program1 manager)
+    {
+        return !IsCivEngagedInWar(civName, manager);
+    }
+
+    public void RollAiWarDeclarations(Program1 manager)
+    {
+        if (manager == null)
+            return;
+
+        List<string> aiCivs = manager.GetLivingCivNames();
+        string playerCiv = manager.currentCivName;
+        aiCivs.Remove(playerCiv);
+
+        foreach (string aiCiv in aiCivs)
+        {
+            if (IsCivEliminated(aiCiv))
+                continue;
+
+            if (!CanAiDeclareNewWar(aiCiv, manager))
+                continue;
+
+            var targets = new List<string>();
+            foreach (string other in manager.GetLivingCivNames())
+            {
+                if (other == aiCiv || IsCivEliminated(other))
+                    continue;
+
+                if (AreAtWar(aiCiv, other))
+                    continue;
+
+                targets.Add(other);
+            }
+
+            if (targets.Count == 0)
+                continue;
+
+            if (Random.value >= aiVsAiWarChance)
+                continue;
+
+            string target = targets[Random.Range(0, targets.Count)];
+            DeclareWarBetween(aiCiv, target, aiCiv);
+        }
+    }
+
+    public void RollAiVsAiWars(Program1 manager) => RollAiWarDeclarations(manager);
+
+    public void CheckCivElimination(string civName)
+    {
+        if (string.IsNullOrEmpty(civName) || eliminatedCivs.Contains(civName))
+            return;
+
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        if (manager == null)
+            return;
+
+        if (manager.CountCivUnits(civName) > 0 || manager.CountCivCities(civName) > 0)
+            return;
+
+        EliminateCiv(civName, manager);
+    }
+
+    void EliminateCiv(string civName, Program1 manager)
+    {
+        eliminatedCivs.Add(civName);
+        enemyNations.Remove(civName);
+
+        var warsToRemove = new List<string>();
+        foreach (string key in activeWarPairs)
+        {
+            string[] parts = key.Split('|');
+            if (parts.Length == 2 && (parts[0] == civName || parts[1] == civName))
+                warsToRemove.Add(key);
+        }
+        foreach (string key in warsToRemove)
+            activeWarPairs.Remove(key);
+
+        CivilizationAI[] aiControllers = Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None);
+        foreach (CivilizationAI ai in aiControllers)
+        {
+            if (ai != null && ai.civilizationName == civName)
+                Destroy(ai.gameObject);
+        }
+
+        SyncWarFlags(manager);
+        Debug.Log("Цивілізацію знищено: " + civName);
+
+        if (civName == manager.currentCivName)
+        {
+            TurnManager turnManager = TurnManager.Instance;
+            if (turnManager != null)
+                turnManager.SetPlayerDefeated();
+            if (GameUI.Instance != null)
+                GameUI.Instance.ShowDefeatMessage();
         }
     }
 
@@ -398,7 +602,10 @@ public class DiplomacyManager : MonoBehaviour
     {
         if (string.IsNullOrEmpty(civName) || civName == "Unknown" || civName == "Player")
             return false;
-        return enemyNations.Contains(civName);
+
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+        return AreAtWar(playerCiv, civName);
     }
 
     // Універсальний метод для UI кнопки "Declare war".
@@ -509,11 +716,11 @@ public class DiplomacyManager : MonoBehaviour
 
         Unit nearest = null;
         float bestDistance = float.MaxValue;
-        foreach (Unit u in manager.allUnits)
+        foreach (Unit u in manager.allUnits.ToArray())
         {
             if (u == null || !u.isPlayer) continue;
 
-            float distance = Vector3Int.Distance(fromUnit.gridPosition, u.gridPosition);
+            float distance = manager.GetHexDistance(fromUnit.gridPosition, u.gridPosition);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -555,30 +762,32 @@ public class DiplomacyManager : MonoBehaviour
     
     public bool CanDeclareWar(string civilization1, string civilization2)
     {
-        // Перевіряємо, чи можна оголосити війну
-        return !isAtWar;
+        return !AreAtWar(civilization1, civilization2);
     }
-    
+
     public void DeclareWar(string civilization1, string civilization2)
     {
-        DeclareWar(civilization2);
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+        string aggressor = civilization1 == playerCiv || civilization2 == playerCiv ? playerCiv : civilization1;
+        DeclareWarBetween(civilization1, civilization2, aggressor);
     }
-    
+
     public bool IsAtWar(string civilization1, string civilization2)
     {
-        return isAtWar;
+        return AreAtWar(civilization1, civilization2);
     }
-    
+
     public void OnUnitDestroyed(string attackerCiv, string defenderCiv)
     {
-        // Обробляємо знищення юніта
         Debug.Log($"Юніт знищено: {attackerCiv} атакував {defenderCiv}");
+        CheckCivElimination(defenderCiv);
     }
-    
+
     public void OnCityCaptured(string attackerCiv, string defenderCiv)
     {
-        // Обробляємо захоплення міста
-        Debug.Log($"Місто захоплено: {attackerCiv} захопив місто {defenderCiv}");
+        Debug.Log($"Місто знищено: {attackerCiv} проти {defenderCiv}");
+        CheckCivElimination(defenderCiv);
     }
     
     public void OnTradeCompleted(string civ1, string civ2)
@@ -591,5 +800,104 @@ public class DiplomacyManager : MonoBehaviour
     {
         // Обробляємо прикордонний конфлікт
         Debug.Log($"Прикордонний конфлікт: {civ1} та {civ2}");
+    }
+
+    public void ExportWarState(out List<string> warPairs, out List<string> eliminated)
+    {
+        warPairs = new List<string>(activeWarPairs);
+        eliminated = new List<string>(eliminatedCivs);
+    }
+
+    public void ImportWarState(List<string> warPairs, List<string> eliminated, List<string> playerEnemies, bool atWar, Program1 manager, string playerCiv)
+    {
+        activeWarPairs.Clear();
+        eliminatedCivs.Clear();
+        enemyNations = playerEnemies ?? new List<string>();
+
+        if (eliminated != null)
+        {
+            foreach (string civ in eliminated)
+            {
+                if (!string.IsNullOrEmpty(civ))
+                    eliminatedCivs.Add(civ);
+            }
+        }
+
+        if (warPairs != null && warPairs.Count > 0)
+        {
+            foreach (string key in warPairs)
+            {
+                if (!string.IsNullOrEmpty(key))
+                    activeWarPairs.Add(key);
+            }
+        }
+        else if (playerEnemies != null && !string.IsNullOrEmpty(playerCiv))
+        {
+            foreach (string enemy in playerEnemies)
+            {
+                if (!string.IsNullOrEmpty(enemy))
+                    activeWarPairs.Add(MakeWarKey(playerCiv, enemy));
+            }
+        }
+
+        SyncWarFlags(manager);
+    }
+
+    public void RestoreAiControllersFromSave(Program1 manager)
+    {
+        if (manager == null)
+        {
+            AiSpawnComplete = true;
+            return;
+        }
+
+        var civs = new HashSet<string>();
+        foreach (City city in manager.allCities)
+        {
+            if (city == null || string.IsNullOrEmpty(city.ownerCivName))
+                continue;
+            if (city.ownerCivName != manager.currentCivName && !IsCivEliminated(city.ownerCivName))
+                civs.Add(city.ownerCivName);
+        }
+
+        foreach (Unit unit in manager.allUnits)
+        {
+            if (unit == null || unit.isPlayer)
+                continue;
+
+            string civName = unit.GetCivName(manager);
+            if (!string.IsNullOrEmpty(civName) && civName != manager.currentCivName && !IsCivEliminated(civName))
+                civs.Add(civName);
+        }
+
+        foreach (CivilizationAI ai in Object.FindObjectsByType<CivilizationAI>(FindObjectsSortMode.None))
+        {
+            if (ai != null)
+                Destroy(ai.gameObject);
+        }
+
+        foreach (string civName in civs)
+            CreateCivilizationAI(civName, GetCivColor(civName), manager);
+
+        AiSpawnComplete = true;
+    }
+
+    public void MakePeace(string targetCiv)
+    {
+        if (string.IsNullOrEmpty(targetCiv))
+            return;
+
+        Program1 manager = Object.FindAnyObjectByType<Program1>();
+        string playerCiv = manager != null ? manager.currentCivName : PlayerPrefs.GetString("SelectedCiv", "Rome");
+
+        activeWarPairs.Remove(MakeWarKey(playerCiv, targetCiv));
+        enemyNations.Remove(targetCiv);
+        SyncWarFlags(manager);
+
+        if (manager != null)
+            manager.pendingWarTargetCiv = "";
+
+        SaveManager.Instance?.MarkUnsaved();
+        Debug.Log("Оголошено мир з " + targetCiv);
     }
 }

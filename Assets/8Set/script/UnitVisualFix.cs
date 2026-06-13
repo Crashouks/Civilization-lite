@@ -34,6 +34,10 @@ public class UnitVisualFix : MonoBehaviour
 
     void EnsureLegsActive()
     {
+        Unit unit = GetComponent<Unit>();
+        if (unit != null && !unit.IsFogVisibleToPlayer())
+            return;
+
         foreach (string legName in new[] { "Front leg", "Back leg" })
         {
             Transform leg = body.Find(legName);

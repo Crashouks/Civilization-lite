@@ -19,8 +19,7 @@ public class UnitAnimator : MonoBehaviour
 
     public void PlayIdle()
     {
-        EnsureReady();
-        SetWalking(false);
+        ForceIdle();
     }
 
     public void PlayWalk()
@@ -38,7 +37,7 @@ public class UnitAnimator : MonoBehaviour
 
         if (walking)
         {
-            animator.ResetTrigger("idle");
+            ResetAllTriggers();
             if (animator.HasState(0, Animator.StringToHash("walk")))
                 animator.Play("walk", 0, 0f);
             else
@@ -46,11 +45,8 @@ public class UnitAnimator : MonoBehaviour
         }
         else
         {
-            animator.ResetTrigger("walk");
-            if (animator.HasState(0, Animator.StringToHash("idle")))
-                animator.Play("idle", 0, 0f);
-            else
-                SetTrigger("idle");
+            ForceIdle();
+            return;
         }
 
         animator.Update(0f);
@@ -59,11 +55,16 @@ public class UnitAnimator : MonoBehaviour
     public void PlayAttack()
     {
         EnsureReady();
-        SetWalking(false);
+        ResetAllTriggers();
+        if (HasParameter("IsWalking"))
+            animator.SetBool("IsWalking", false);
+
         if (animator.HasState(0, Animator.StringToHash("attack")))
             animator.Play("attack", 0, 0f);
+
         SetTrigger("Attack");
         SetTrigger("attack");
+        SetTrigger("ToAttack");
         animator.Update(0f);
     }
 
@@ -79,7 +80,9 @@ public class UnitAnimator : MonoBehaviour
     public void PlayDeathAnimation()
     {
         EnsureReady();
-        SetWalking(false);
+        ResetAllTriggers();
+        if (HasParameter("IsWalking"))
+            animator.SetBool("IsWalking", false);
         SetTrigger("Die");
         SetTrigger("die");
     }
@@ -87,8 +90,7 @@ public class UnitAnimator : MonoBehaviour
     public void PlaySettleAnimation()
     {
         EnsureReady();
-        SetWalking(false);
-        SetTrigger("idle");
+        ForceIdle();
     }
 
     public float GetAttackDuration()
@@ -99,7 +101,7 @@ public class UnitAnimator : MonoBehaviour
             foreach (AnimationClip clip in animator.runtimeAnimatorController.animationClips)
             {
                 if (clip != null && clip.name.ToLower().Contains("attack"))
-                    return clip.length;
+                    return Mathf.Clamp(clip.length, 0.35f, 1.1f);
             }
         }
         return 0.55f;
@@ -121,25 +123,30 @@ public class UnitAnimator : MonoBehaviour
     {
         if (target == null) yield break;
 
+        FaceToward(target.transform.position - transform.position);
         PlayAttack();
 
         float duration = GetAttackDuration();
         float hitTime = duration * 0.45f;
         float elapsed = 0f;
-        bool hit = false;
+        bool hitApplied = false;
 
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
-            if (!hit && elapsed >= hitTime)
+            if (!hitApplied && elapsed >= hitTime)
             {
-                hit = true;
-                target.TakeDamage(damage);
+                hitApplied = true;
+                if (target != null)
+                {
+                    Unit attacker = GetComponent<Unit>() ?? GetComponentInParent<Unit>();
+                    target.TakeDamage(damage, attacker);
+                }
             }
             yield return null;
         }
 
-        PlayIdle();
+        ForceIdle();
     }
 
     public IEnumerator WalkTo(Vector3 worldTarget)
@@ -147,7 +154,34 @@ public class UnitAnimator : MonoBehaviour
         PlayWalk();
         while (Vector3.Distance(transform.position, worldTarget) > 0.005f)
             yield return null;
-        PlayIdle();
+        ForceIdle();
+    }
+
+    public void ForceIdle()
+    {
+        EnsureReady();
+        if (animator == null) return;
+
+        ResetAllTriggers();
+        if (HasParameter("IsWalking"))
+            animator.SetBool("IsWalking", false);
+
+        if (animator.HasState(0, Animator.StringToHash("idle")))
+            animator.Play("idle", 0, 0f);
+        else
+            SetTrigger("idle");
+
+        animator.Update(0f);
+    }
+
+    void ResetAllTriggers()
+    {
+        if (animator == null) return;
+        foreach (AnimatorControllerParameter p in animator.parameters)
+        {
+            if (p.type == AnimatorControllerParameterType.Trigger)
+                animator.ResetTrigger(p.name);
+        }
     }
 
     void SetTrigger(string name)

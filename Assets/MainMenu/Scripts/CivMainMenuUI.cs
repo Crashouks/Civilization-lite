@@ -14,9 +14,17 @@ public class CivMainMenuUI : MonoBehaviour
     private GameObject mainPanel;
     private GameObject civPanel;
     private GameObject settingsPanel;
+    private GameObject loadPanel;
+    private readonly MenuButtonAnimator[] loadSlotButtons = new MenuButtonAnimator[SaveManager.SlotCount];
+    private readonly bool[] loadSlotExists = new bool[SaveManager.SlotCount];
+    private readonly SaveSlotInfo[] loadSlotCloudInfo = new SaveSlotInfo[SaveManager.SlotCount];
+    private bool loadSlotCloudPending;
     private MenuButtonAnimator loadButtonAnimator;
     private TextMeshProUGUI loadButtonLabel;
     private List<Resolution> settingsResolutions;
+    private int resolutionIndex;
+    private TextMeshProUGUI resolutionButtonLabel;
+    private TextMeshProUGUI windowModeButtonLabel;
     private TextMeshProUGUI vsyncButtonLabel;
     private Image vsyncButtonBg;
     private bool vsyncEnabled;
@@ -53,13 +61,17 @@ public class CivMainMenuUI : MonoBehaviour
         BuildReadabilityGradient(transform);
         BuildMenuContent(transform);
         BuildCivSelectionPanel(transform);
+        BuildLoadPanel(transform);
         BuildSettingsPanel(transform);
         BuildVersionLabel(transform);
 
         civPanel.SetActive(false);
         settingsPanel.SetActive(false);
+        loadPanel.SetActive(false);
 
         RefreshLoadButton();
+        if (SaveManager.IsCloudConfigured())
+            StartCoroutine(RefreshLoadButtonFromCloud());
     }
 
     void FindFonts()
@@ -138,7 +150,7 @@ public class CivMainMenuUI : MonoBehaviour
         titleRt.anchoredPosition = Vector2.zero;
         titleRt.sizeDelta = new Vector2(0, TitleHeight);
         title.alignment = TextAlignmentOptions.TopLeft;
-        title.enableWordWrapping = false;
+        title.textWrappingMode = TextWrappingModes.NoWrap;
         title.overflowMode = TextOverflowModes.Overflow;
         title.characterSpacing = 1f;
         title.lineSpacing = 0f;
@@ -173,7 +185,7 @@ public class CivMainMenuUI : MonoBehaviour
         layout.padding = new RectOffset(buttonInset, buttonInset, 88, 0);
 
         CreateMenuButton(mainPanel.transform, "NEW GAME", controller.OpenCivSelection);
-        loadButtonAnimator = CreateMenuButton(mainPanel.transform, "LOAD GAME", controller.LoadGame);
+        loadButtonAnimator = CreateMenuButton(mainPanel.transform, "LOAD GAME", controller.OpenLoadPanel);
         loadButtonLabel = loadButtonAnimator.GetComponentInChildren<TextMeshProUGUI>();
         CreateMenuButton(mainPanel.transform, "SETTINGS", controller.OpenSettings);
         CreateMenuButton(mainPanel.transform, "QUIT", controller.ExitGame);
@@ -208,6 +220,168 @@ public class CivMainMenuUI : MonoBehaviour
         CreateModalButton(content.transform, "BACK", controller.BackToMenu);
     }
 
+    void BuildLoadPanel(Transform parent)
+    {
+        loadPanel = CreateUIObject("LoadPanel", parent);
+        SetupModalPanel(loadPanel, new Vector2(460, 360), true);
+        loadPanel.transform.SetAsLastSibling();
+
+        GameObject content = CreateUIObject("Content", loadPanel.transform);
+        StretchFull(content.GetComponent<RectTransform>());
+        VerticalLayoutGroup layout = content.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(36, 36, 32, 32);
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        AddLayoutHeader(content.transform, "LOAD GAME", 24, settingsFont);
+
+        for (int i = 0; i < SaveManager.SlotCount; i++)
+        {
+            int slot = i + 1;
+            loadSlotButtons[i] = CreateModalButton(content.transform, "Slot " + slot, () => controller.LoadGameFromSlot(slot));
+        }
+
+        CreateModalButton(content.transform, "BACK", ShowMainPanel);
+    }
+
+    public void ShowLoadPanel()
+    {
+        if (menuRoot != null) menuRoot.SetActive(false);
+        SetPanelActive(civPanel, false);
+        SetPanelActive(settingsPanel, false);
+        RefreshLoadSlotLabels();
+        SetPanelActive(loadPanel, true, false);
+    }
+
+    void RefreshLoadSlotLabels()
+    {
+        for (int i = 0; i < SaveManager.SlotCount; i++)
+            loadSlotExists[i] = SaveManager.GetLocalSlotInfo(i + 1).exists;
+
+        loadSlotCloudPending = SaveManager.IsCloudConfigured();
+        ApplyLoadSlotButtonLabels();
+
+        if (!loadSlotCloudPending)
+            return;
+
+        StartCoroutine(RefreshLoadSlotLabelsFromCloud());
+    }
+
+    void ApplyLoadSlotButtonLabels()
+    {
+        for (int i = 0; i < SaveManager.SlotCount; i++)
+        {
+            if (loadSlotButtons[i] == null) continue;
+            SaveSlotInfo info = SaveManager.GetLocalSlotInfo(i + 1);
+            if (loadSlotExists[i])
+            {
+                SaveSlotInfo cloud = loadSlotCloudInfo[i];
+                if (!info.exists && cloud.exists)
+                    info = cloud;
+                else if (info.exists && cloud.exists && cloud.turnNumber >= info.turnNumber)
+                    info = cloud;
+            }
+
+            TextMeshProUGUI label = loadSlotButtons[i].GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                string line = loadSlotExists[i] ? info.GetDisplayLine() : "Empty";
+                label.text = "Slot " + (i + 1) + ": " + line;
+                label.color = loadSlotExists[i] ? Cream : GoldDim;
+            }
+            loadSlotButtons[i].SetInteractable(GetLoadSlotInteractable(i));
+        }
+    }
+
+    bool GetLoadSlotInteractable(int index)
+    {
+        if (!loadSlotExists[index])
+            return false;
+
+        if (loadSlotCloudPending && !SaveManager.HasSave(index + 1))
+            return false;
+
+        return true;
+    }
+
+    IEnumerator RefreshLoadSlotLabelsFromCloud()
+    {
+        SaveSlotInfo[] cloudSlots = null;
+        yield return CloudSaveClient.FetchSlotSummariesCoroutine(r => cloudSlots = r);
+
+        if (cloudSlots == null)
+            yield break;
+
+        for (int i = 0; i < SaveManager.SlotCount && i < cloudSlots.Length; i++)
+        {
+            loadSlotCloudInfo[i] = cloudSlots[i];
+            if (cloudSlots[i].exists)
+                loadSlotExists[i] = true;
+        }
+
+        if (loadPanel != null && loadPanel.activeSelf)
+        {
+            loadSlotCloudPending = false;
+            ApplyLoadSlotButtonLabels();
+        }
+    }
+
+    IEnumerator RefreshLoadButtonFromCloud()
+    {
+        SaveSlotInfo[] cloudSlots = null;
+        yield return CloudSaveClient.FetchSlotSummariesCoroutine(r => cloudSlots = r);
+
+        bool anySave = SaveManager.HasSave();
+        if (cloudSlots != null)
+        {
+            foreach (SaveSlotInfo info in cloudSlots)
+            {
+                if (info.exists)
+                {
+                    anySave = true;
+                    break;
+                }
+            }
+        }
+
+        ApplyLoadButtonState(anySave, cloudSlots);
+    }
+
+    void ApplyLoadButtonState(bool anySave, SaveSlotInfo[] cloudSlots = null)
+    {
+        if (loadButtonAnimator == null) return;
+        loadButtonAnimator.SetInteractable(anySave);
+
+        if (loadButtonLabel == null) return;
+
+        SaveSlotInfo best = default;
+        best.exists = false;
+        best.turnNumber = 0;
+
+        for (int i = 1; i <= SaveManager.SlotCount; i++)
+        {
+            SaveSlotInfo local = SaveManager.GetLocalSlotInfo(i);
+            SaveSlotInfo info = local;
+            if (cloudSlots != null && i - 1 < cloudSlots.Length && cloudSlots[i - 1].exists)
+            {
+                SaveSlotInfo cloud = cloudSlots[i - 1];
+                if (!info.exists || cloud.turnNumber >= info.turnNumber)
+                    info = cloud;
+            }
+
+            if (info.exists && info.turnNumber >= best.turnNumber)
+                best = info;
+        }
+
+        loadButtonLabel.text = best.exists
+            ? $"LOAD GAME  ·  Turn {Mathf.Max(1, best.turnNumber)}"
+            : "LOAD GAME";
+    }
+
     MenuButtonAnimator CreateModalButton(Transform parent, string label, Action onClick)
     {
         return CreateMenuButton(parent, label, onClick, true, true, ModalButtonHeight);
@@ -216,7 +390,7 @@ public class CivMainMenuUI : MonoBehaviour
     void BuildSettingsPanel(Transform parent)
     {
         settingsPanel = CreateUIObject("SettingsPanel", parent);
-        SetupModalPanel(settingsPanel, new Vector2(520, 500), true);
+        SetupModalPanel(settingsPanel, new Vector2(520, 560), true);
         settingsPanel.transform.SetAsLastSibling();
 
         GameObject content = CreateUIObject("Content", settingsPanel.transform);
@@ -232,12 +406,15 @@ public class CivMainMenuUI : MonoBehaviour
 
         AddLayoutHeader(content.transform, "SETTINGS", 32, settingsFont);
         BuildSettingRowLabel(content.transform, "RESOLUTION");
-        BuildResolutionDropdown(content.transform);
+        resolutionButtonLabel = BuildSettingCycleButton(content.transform, "1920 x 1080", CycleResolution);
+        BuildSettingRowLabel(content.transform, "WINDOW MODE");
+        windowModeButtonLabel = BuildSettingCycleButton(content.transform, "Windowed", CycleWindowMode);
         BuildSettingRowLabel(content.transform, "VSYNC");
         BuildVSyncToggle(content.transform);
         BuildSettingRowLabel(content.transform, "MASTER VOLUME");
         BuildVolumeSlider(content.transform);
         CreateMenuButton(content.transform, "BACK", controller.BackToMenu, true, true, ModalButtonHeight);
+        RefreshSettingsVisuals();
     }
 
     void BuildSettingRowLabel(Transform parent, string text)
@@ -250,17 +427,17 @@ public class CivMainMenuUI : MonoBehaviour
         tmp.alignment = TextAlignmentOptions.MidlineLeft;
     }
 
-    void BuildResolutionDropdown(Transform parent)
+    TextMeshProUGUI BuildSettingCycleButton(Transform parent, string label, UnityEngine.Events.UnityAction onClick)
     {
-        GameObject ddRoot = CreateUIObject("ResolutionDropdown", parent);
-        LayoutElement le = ddRoot.AddComponent<LayoutElement>();
-        le.preferredHeight = 46f;
+        GameObject row = CreateUIObject("SettingCycleButton", parent);
+        LayoutElement rowLe = row.AddComponent<LayoutElement>();
+        rowLe.preferredHeight = 46f;
 
-        GameObject border = CreateUIObject("Border", ddRoot.transform);
+        GameObject border = CreateUIObject("Border", row.transform);
         StretchFull(border.GetComponent<RectTransform>());
         AddRoundedImage(border, BtnBorder).raycastTarget = false;
 
-        GameObject clickArea = CreateUIObject("ClickArea", ddRoot.transform);
+        GameObject clickArea = CreateUIObject("ClickArea", row.transform);
         RectTransform clickRt = clickArea.GetComponent<RectTransform>();
         StretchFull(clickRt);
         clickRt.offsetMin = new Vector2(1.5f, 1.5f);
@@ -269,143 +446,50 @@ public class CivMainMenuUI : MonoBehaviour
         bg.raycastTarget = true;
 
         GameObject labelObj = CreateUIObject("Label", clickArea.transform);
-        RectTransform labelRt = labelObj.GetComponent<RectTransform>();
-        StretchFull(labelRt);
-        labelRt.offsetMin = new Vector2(14, 0);
-        labelRt.offsetMax = new Vector2(-30, 0);
-        TextMeshProUGUI caption = AddText(labelObj, "1920 x 1080", 16, Cream, FontStyles.Bold, settingsFont);
+        StretchFull(labelObj.GetComponent<RectTransform>());
+        TextMeshProUGUI caption = AddText(labelObj, label, 16, Cream, FontStyles.Bold, settingsFont);
         caption.alignment = TextAlignmentOptions.Center;
         caption.raycastTarget = false;
 
-        GameObject arrowObj = CreateUIObject("Arrow", clickArea.transform);
-        RectTransform arrowRt = arrowObj.GetComponent<RectTransform>();
-        arrowRt.anchorMin = new Vector2(1, 0.5f);
-        arrowRt.anchorMax = new Vector2(1, 0.5f);
-        arrowRt.pivot = new Vector2(1, 0.5f);
-        arrowRt.sizeDelta = new Vector2(22, 22);
-        arrowRt.anchoredPosition = new Vector2(-8, 0);
-        TextMeshProUGUI arrow = AddText(arrowObj, "v", 15, Gold, FontStyles.Bold, settingsFont);
-        StretchFull(arrow.rectTransform);
-        arrow.alignment = TextAlignmentOptions.Center;
-        arrow.raycastTarget = false;
+        Button button = clickArea.AddComponent<Button>();
+        button.targetGraphic = bg;
+        button.onClick.AddListener(onClick);
 
-        GameObject template = BuildDropdownTemplate(ddRoot.transform);
-        template.SetActive(false);
-
-        Transform itemLabelTransform = template.transform.Find("Viewport/Content/Item/Item Label");
-        TextMeshProUGUI itemLabel = itemLabelTransform.GetComponent<TextMeshProUGUI>();
-        Image itemBg = template.transform.Find("Viewport/Content/Item/Item Background").GetComponent<Image>();
-
-        TMP_Dropdown dropdown = clickArea.AddComponent<TMP_Dropdown>();
-        dropdown.targetGraphic = bg;
-        dropdown.captionText = caption;
-        dropdown.itemText = itemLabel;
-        dropdown.itemImage = itemBg;
-        dropdown.template = template.GetComponent<RectTransform>();
-
-        settingsResolutions = GameSettings.GetUniqueResolutions();
-        var options = new List<string>();
-        foreach (Resolution r in settingsResolutions)
-            options.Add(FormatResolution(r));
-
-        dropdown.ClearOptions();
-        dropdown.AddOptions(options);
-        int selected = GameSettings.FindResolutionIndex(settingsResolutions);
-        dropdown.value = selected;
-        dropdown.RefreshShownValue();
-
-        dropdown.onValueChanged.AddListener(index =>
-        {
-            if (settingsResolutions == null || index < 0 || index >= settingsResolutions.Count) return;
-            Resolution r = settingsResolutions[index];
-            GameSettings.SetResolution(r.width, r.height, Screen.fullScreen);
-        });
+        return caption;
     }
 
-    static string FormatResolution(Resolution r) => r.width + " x " + r.height;
-
-    GameObject BuildDropdownTemplate(Transform parent)
+    void CycleResolution()
     {
-        GameObject template = CreateUIObject("Template", parent);
-        RectTransform templateRt = template.GetComponent<RectTransform>();
-        templateRt.anchorMin = new Vector2(0, 0);
-        templateRt.anchorMax = new Vector2(1, 0);
-        templateRt.pivot = new Vector2(0.5f, 1f);
-        templateRt.anchoredPosition = new Vector2(0, -2);
-        templateRt.sizeDelta = new Vector2(0, 180);
+        if (settingsResolutions == null || settingsResolutions.Count == 0)
+            settingsResolutions = GameSettings.GetUniqueResolutions();
 
-        Image templateBg = AddRoundedImage(template, PanelBg);
-        StretchFull(templateBg.rectTransform);
-        templateBg.raycastTarget = true;
+        resolutionIndex = (resolutionIndex + 1) % settingsResolutions.Count;
+        Resolution r = settingsResolutions[resolutionIndex];
+        GameSettings.SetResolution(r.width, r.height);
+        RefreshSettingsVisuals();
+    }
 
-        ScrollRect scroll = template.AddComponent<ScrollRect>();
-        scroll.horizontal = false;
-        scroll.movementType = ScrollRect.MovementType.Clamped;
+    void CycleWindowMode()
+    {
+        GameSettings.CycleWindowMode();
+        RefreshSettingsVisuals();
+    }
 
-        GameObject viewport = CreateUIObject("Viewport", template.transform);
-        RectTransform viewportRt = viewport.GetComponent<RectTransform>();
-        StretchFull(viewportRt);
-        viewport.AddComponent<RectMask2D>();
-        Image viewportImg = AddImage(viewport, Color.white);
-        viewportImg.color = new Color(1, 1, 1, 0.01f);
-        viewportImg.raycastTarget = true;
+    void RefreshSettingsVisuals()
+    {
+        if (settingsResolutions == null || settingsResolutions.Count == 0)
+            settingsResolutions = GameSettings.GetUniqueResolutions();
 
-        GameObject content = CreateUIObject("Content", viewport.transform);
-        RectTransform contentRt = content.GetComponent<RectTransform>();
-        contentRt.anchorMin = new Vector2(0, 1);
-        contentRt.anchorMax = new Vector2(1, 1);
-        contentRt.pivot = new Vector2(0.5f, 1);
-        contentRt.anchoredPosition = Vector2.zero;
-        contentRt.sizeDelta = new Vector2(0, 36);
+        resolutionIndex = GameSettings.FindResolutionIndex(settingsResolutions);
+        Resolution r = settingsResolutions[Mathf.Clamp(resolutionIndex, 0, settingsResolutions.Count - 1)];
 
-        VerticalLayoutGroup itemLayout = content.AddComponent<VerticalLayoutGroup>();
-        itemLayout.childControlWidth = true;
-        itemLayout.childControlHeight = true;
-        itemLayout.childForceExpandWidth = true;
-        itemLayout.childForceExpandHeight = false;
+        if (resolutionButtonLabel != null)
+            resolutionButtonLabel.text = r.width + " x " + r.height;
 
-        ContentSizeFitter sizeFitter = content.AddComponent<ContentSizeFitter>();
-        sizeFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        if (windowModeButtonLabel != null)
+            windowModeButtonLabel.text = GameSettings.GetWindowModeLabel(GameSettings.GetWindowMode());
 
-        GameObject item = CreateUIObject("Item", content.transform);
-        RectTransform itemRt = item.GetComponent<RectTransform>();
-        itemRt.anchorMin = new Vector2(0, 1);
-        itemRt.anchorMax = new Vector2(1, 1);
-        itemRt.pivot = new Vector2(0.5f, 1);
-        itemRt.sizeDelta = new Vector2(0, 36);
-
-        LayoutElement itemLe = item.AddComponent<LayoutElement>();
-        itemLe.preferredHeight = 36f;
-        itemLe.minHeight = 36f;
-
-        Toggle toggle = item.AddComponent<Toggle>();
-        toggle.toggleTransition = Toggle.ToggleTransition.Fade;
-
-        GameObject itemBg = CreateUIObject("Item Background", item.transform);
-        StretchFull(itemBg.GetComponent<RectTransform>());
-        Image itemBgImg = AddRoundedImage(itemBg, new Color(0.14f, 0.1f, 0.06f, 0.5f));
-        itemBgImg.raycastTarget = true;
-        toggle.targetGraphic = itemBgImg;
-
-        GameObject itemLabelObj = CreateUIObject("Item Label", item.transform);
-        StretchFull(itemLabelObj.GetComponent<RectTransform>());
-        RectTransform ilRt = itemLabelObj.GetComponent<RectTransform>();
-        ilRt.offsetMin = new Vector2(8, 0);
-        ilRt.offsetMax = new Vector2(-8, 0);
-        TextMeshProUGUI itemTmp = AddText(itemLabelObj, "Option", 15, Cream, FontStyles.Bold, settingsFont);
-        itemTmp.alignment = TextAlignmentOptions.Center;
-
-        ColorBlock colors = toggle.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor = new Color(1f, 0.95f, 0.85f, 1f);
-        colors.pressedColor = new Color(0.85f, 0.75f, 0.55f, 1f);
-        colors.selectedColor = new Color(1f, 0.92f, 0.65f, 1f);
-        toggle.colors = colors;
-
-        scroll.content = contentRt;
-        scroll.viewport = viewportRt;
-
-        return template;
+        RefreshVSyncVisual();
     }
 
     void BuildVSyncToggle(Transform parent)
@@ -638,6 +722,7 @@ public class CivMainMenuUI : MonoBehaviour
     {
         SetPanelActive(civPanel, false);
         SetPanelActive(settingsPanel, false);
+        SetPanelActive(loadPanel, false);
         if (menuRoot != null) menuRoot.SetActive(true);
         RefreshLoadButton();
     }
@@ -646,6 +731,7 @@ public class CivMainMenuUI : MonoBehaviour
     {
         if (menuRoot != null) menuRoot.SetActive(false);
         SetPanelActive(settingsPanel, false);
+        SetPanelActive(loadPanel, false);
         SetPanelActive(civPanel, true, false);
     }
 
@@ -653,7 +739,9 @@ public class CivMainMenuUI : MonoBehaviour
     {
         if (menuRoot != null) menuRoot.SetActive(false);
         SetPanelActive(civPanel, false);
+        SetPanelActive(loadPanel, false);
         SetPanelActive(settingsPanel, true, false);
+        RefreshSettingsVisuals();
     }
 
     void SetPanelActive(GameObject panel, bool active, bool instant = false)
@@ -666,17 +754,7 @@ public class CivMainMenuUI : MonoBehaviour
 
     public void RefreshLoadButton()
     {
-        if (loadButtonAnimator == null) return;
-
-        bool hasSave = SaveManager.TryReadSave(out GameSaveData data);
-        loadButtonAnimator.SetInteractable(hasSave);
-
-        if (loadButtonLabel != null)
-        {
-            loadButtonLabel.text = hasSave
-                ? $"LOAD GAME  ·  Turn {Mathf.Max(1, data.currentTurn)}"
-                : "LOAD GAME";
-        }
+        ApplyLoadButtonState(SaveManager.HasSave());
     }
 
     GameObject CreateUIObject(string name, Transform parent)

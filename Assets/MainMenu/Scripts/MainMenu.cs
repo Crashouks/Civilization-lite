@@ -125,20 +125,30 @@ public class MainMenu : MonoBehaviour
 
     public bool HasSaveFile() => SaveManager.HasSave();
 
+    public void OpenLoadPanel() => civUI?.ShowLoadPanel();
+
+    public void LoadGameFromSlot(int slot)
+    {
+        if (!SaveManager.HasSave(slot) && !SaveManager.IsCloudConfigured())
+        {
+            Debug.LogWarning("No save in slot " + slot);
+            return;
+        }
+
+        SaveManager.PrepareLoadFromSlot(slot);
+        SceneManager.LoadScene(GameSceneName);
+    }
+
     public void LoadGame()
     {
-        if (!SaveManager.TryReadSave(out GameSaveData data))
+        int slot = SaveManager.FindFirstOccupiedSlot();
+        if (slot < 0)
         {
             Debug.LogWarning("No save file found");
             return;
         }
 
-        if (!string.IsNullOrEmpty(data.playerCiv))
-            PlayerPrefs.SetString("SelectedCiv", data.playerCiv);
-
-        PlayerPrefs.SetInt(LoadOnStartKey, 1);
-        PlayerPrefs.Save();
-        SceneManager.LoadScene(GameSceneName);
+        LoadGameFromSlot(slot);
     }
 
     public void OpenCivSelection() => civUI?.ShowCivPanel();

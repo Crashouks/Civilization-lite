@@ -8,21 +8,28 @@ public class CameraController : MonoBehaviour
 
     [Header("Zoom")]
     public float zoomSpeed = 1f;
-    public float minZoom = 4f;  // Максимальне наближення
-    public float maxZoom = 15; // Максимальне віддалення
-    
+    public float minZoom = 4f;
+    public float maxZoom = 15;
 
-    private Camera cam;
+    Camera cam;
+    Program1 map;
 
     void Awake()
     {
         cam = GetComponent<Camera>();
     }
 
+    void Start()
+    {
+        map = Object.FindAnyObjectByType<Program1>();
+        ClampToMap();
+    }
+
     void Update()
     {
         MoveCamera();
         ZoomCamera();
+        ClampToMap();
     }
 
     void MoveCamera()
@@ -31,14 +38,12 @@ public class CameraController : MonoBehaviour
 
         if (Keyboard.current != null)
         {
-            // У 2D "вгору" - це Y, "вправо" - це X
             if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) dir.y = 1;
             if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) dir.y = -1;
             if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) dir.x = -1;
             if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) dir.x = 1;
         }
 
-        // Рухаємо камеру. Normalized не дає рухатись швидше по діагоналі.
         Vector3 move = dir.normalized * moveSpeed * Time.deltaTime;
         transform.Translate(move, Space.World);
     }
@@ -47,17 +52,24 @@ public class CameraController : MonoBehaviour
     {
         if (Mouse.current == null || cam == null) return;
 
-        // Отримуємо прокрутку коліщатка
         float scroll = Mouse.current.scroll.ReadValue().y;
 
         if (cam.orthographic)
         {
-            // Для 2D камери (Orthographic) змінюємо розмір лінзи
             float newSize = cam.orthographicSize;
-            newSize -= scroll * zoomSpeed * 0.001f; // Коригуємо чутливість
+            newSize -= scroll * zoomSpeed * 0.001f;
             newSize = Mathf.Clamp(newSize, minZoom, maxZoom);
             cam.orthographicSize = newSize;
         }
-      
+    }
+
+    void ClampToMap()
+    {
+        if (map == null)
+            map = Object.FindAnyObjectByType<Program1>();
+        if (map == null || cam == null)
+            return;
+
+        map.ClampCameraPosition(cam);
     }
 }

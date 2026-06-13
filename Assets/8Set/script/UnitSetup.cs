@@ -2,7 +2,7 @@ using UnityEngine;
 
 public static class UnitSetup
 {
-    const int BaseSortingOrder = 12;
+    const int BaseSortingOrder = 20;
 
     public static void Configure(GameObject obj, string unitName, bool isPlayer)
     {
@@ -31,10 +31,7 @@ public static class UnitSetup
         else col.isTrigger = true;
 
         if (col is BoxCollider2D boxCol)
-        {
-            SpriteRenderer sr = obj.GetComponentInChildren<SpriteRenderer>();
-            boxCol.size = sr != null && sr.sprite != null ? sr.sprite.bounds.size : new Vector2(1f, 1.8f);
-        }
+            FitPickCollider(obj, boxCol);
 
         Animator anim = obj.GetComponent<Animator>() ?? obj.GetComponentInChildren<Animator>(true);
         if (anim != null)
@@ -53,6 +50,46 @@ public static class UnitSetup
         UnitAnimator visuals = obj.GetComponent<UnitAnimator>() ?? obj.AddComponent<UnitAnimator>();
         visuals.EnsureReady();
         visuals.PlayIdle();
+    }
+
+    public static void FitPickCollider(GameObject obj)
+    {
+        if (obj == null) return;
+
+        BoxCollider2D box = obj.GetComponent<BoxCollider2D>();
+        if (box == null)
+        {
+            box = obj.AddComponent<BoxCollider2D>();
+            box.isTrigger = true;
+        }
+
+        FitPickCollider(obj, box);
+    }
+
+    public static void FitPickCollider(GameObject obj, BoxCollider2D box)
+    {
+        if (obj == null || box == null) return;
+
+        SpriteRenderer[] renderers = obj.GetComponentsInChildren<SpriteRenderer>(true);
+        if (renderers.Length == 0)
+        {
+            box.offset = Vector2.zero;
+            box.size = new Vector2(1.2f, 2f);
+            box.isTrigger = true;
+            return;
+        }
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null && renderers[i].enabled)
+                bounds.Encapsulate(renderers[i].bounds);
+        }
+
+        const float padding = 0.2f;
+        box.offset = obj.transform.InverseTransformPoint(bounds.center);
+        box.size = (Vector2)bounds.size + Vector2.one * padding;
+        box.isTrigger = true;
     }
 
     public static void ApplySorting(Transform root)

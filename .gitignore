@@ -18,3 +18,5 @@
 *.pdb
 *.opendb
 *.VC.db
+server/node_modules/
+server/.env

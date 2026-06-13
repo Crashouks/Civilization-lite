@@ -1,6 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum WindowModeType
+{
+    Windowed = 0,
+    Fullscreen = 1,
+    Borderless = 2
+}
+
 public static class GameSettings
 {
     public const string MasterVolumeKey = "MasterVolume";
@@ -8,6 +15,7 @@ public static class GameSettings
     public const string ResolutionWidthKey = "ResolutionWidth";
     public const string ResolutionHeightKey = "ResolutionHeight";
     public const string FullscreenKey = "Fullscreen";
+    public const string WindowModeKey = "WindowMode";
 
     public static void ApplySavedSettings()
     {
@@ -16,10 +24,9 @@ public static class GameSettings
 
         int width = PlayerPrefs.GetInt(ResolutionWidthKey, Screen.currentResolution.width);
         int height = PlayerPrefs.GetInt(ResolutionHeightKey, Screen.currentResolution.height);
-        bool fullscreen = PlayerPrefs.GetInt(FullscreenKey, Screen.fullScreen ? 1 : 0) == 1;
 
         if (width >= 800 && height >= 600)
-            Screen.SetResolution(width, height, fullscreen);
+            Screen.SetResolution(width, height, ToFullScreenMode(GetWindowMode()));
     }
 
     public static void SetMasterVolume(float volume)
@@ -42,13 +49,73 @@ public static class GameSettings
         return PlayerPrefs.GetInt(VSyncKey, QualitySettings.vSyncCount > 0 ? 1 : 0) == 1;
     }
 
-    public static void SetResolution(int width, int height, bool fullscreen = true)
+    public static WindowModeType GetWindowMode()
     {
-        Screen.SetResolution(width, height, fullscreen);
+        if (PlayerPrefs.HasKey(WindowModeKey))
+            return (WindowModeType)Mathf.Clamp(PlayerPrefs.GetInt(WindowModeKey, 0), 0, 2);
+
+        bool legacyFullscreen = PlayerPrefs.GetInt(FullscreenKey, Screen.fullScreen ? 1 : 0) == 1;
+        return legacyFullscreen ? WindowModeType.Borderless : WindowModeType.Windowed;
+    }
+
+    public static void SetWindowMode(WindowModeType mode)
+    {
+        PlayerPrefs.SetInt(WindowModeKey, (int)mode);
+        PlayerPrefs.SetInt(FullscreenKey, mode == WindowModeType.Windowed ? 0 : 1);
+        PlayerPrefs.Save();
+        ApplyCurrentResolution();
+    }
+
+    public static WindowModeType CycleWindowMode()
+    {
+        WindowModeType next = (WindowModeType)(((int)GetWindowMode() + 1) % 3);
+        SetWindowMode(next);
+        return next;
+    }
+
+    public static string GetWindowModeLabel(WindowModeType mode)
+    {
+        switch (mode)
+        {
+            case WindowModeType.Fullscreen: return "Fullscreen";
+            case WindowModeType.Borderless: return "Borderless";
+            default: return "Windowed";
+        }
+    }
+
+    public static FullScreenMode ToFullScreenMode(WindowModeType mode)
+    {
+        switch (mode)
+        {
+            case WindowModeType.Fullscreen:
+                return FullScreenMode.ExclusiveFullScreen;
+            case WindowModeType.Borderless:
+                return FullScreenMode.FullScreenWindow;
+            default:
+                return FullScreenMode.Windowed;
+        }
+    }
+
+    public static void ApplyCurrentResolution()
+    {
+        int width = PlayerPrefs.GetInt(ResolutionWidthKey, Screen.width);
+        int height = PlayerPrefs.GetInt(ResolutionHeightKey, Screen.height);
+        if (width >= 800 && height >= 600)
+            Screen.SetResolution(width, height, ToFullScreenMode(GetWindowMode()));
+    }
+
+    public static void SetResolution(int width, int height)
+    {
+        Screen.SetResolution(width, height, ToFullScreenMode(GetWindowMode()));
         PlayerPrefs.SetInt(ResolutionWidthKey, width);
         PlayerPrefs.SetInt(ResolutionHeightKey, height);
-        PlayerPrefs.SetInt(FullscreenKey, fullscreen ? 1 : 0);
         PlayerPrefs.Save();
+    }
+
+    public static void SetResolution(int width, int height, bool fullscreen)
+    {
+        SetWindowMode(fullscreen ? WindowModeType.Borderless : WindowModeType.Windowed);
+        SetResolution(width, height);
     }
 
     public static List<Resolution> GetUniqueResolutions()
