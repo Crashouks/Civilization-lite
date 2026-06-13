@@ -1,5 +1,7 @@
 # Civilization-lite MySQL API
 
+> **Full setup guide:** see the [MySQL & cloud save tutorial](../README.md#mysql-cloud-saves--overview) in the root README.
+
 Unity should **not** connect to MySQL directly (database password would be inside the game).  
 This small Node.js server talks to MySQL and exposes a REST API for cloud saves.
 
