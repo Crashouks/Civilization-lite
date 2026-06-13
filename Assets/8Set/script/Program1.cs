@@ -826,6 +826,58 @@ public class Program1 : MonoBehaviour
         return cell;
     }
 
+    float GetHexPickRadius()
+    {
+        return cellWidth * hexWorldScale * 0.5f;
+    }
+
+    bool IsWorldPointInHexCell(Vector3 world, Vector3Int cell)
+    {
+        if (tilemap == null || !IsValidMapCell(cell))
+            return false;
+
+        Vector3 center = tilemap.GetCellCenterWorld(cell);
+        float radius = GetHexPickRadius();
+        float dx = Mathf.Abs(world.x - center.x) / radius;
+        float dy = Mathf.Abs(world.y - center.y) / radius;
+        return dy <= 0.866f && dy <= 0.866f - dx * 0.5f && dx <= 1f;
+    }
+
+    bool TryGetMouseMapCell(out Vector3Int cell)
+    {
+        cell = Vector3Int.zero;
+        if (tilemap == null)
+            return false;
+
+        Vector3 world = GetMouseWorldPoint();
+        Vector3Int primary = GetMouseCell();
+
+        Vector3Int best = new Vector3Int(int.MinValue, int.MinValue, 0);
+        float bestDistSq = float.MaxValue;
+
+        foreach (Vector3Int candidate in GetCellAndNeighbors(primary))
+        {
+            Vector3Int cellCandidate = candidate;
+            cellCandidate.z = 0;
+            if (!IsWorldPointInHexCell(world, cellCandidate))
+                continue;
+
+            Vector3 center = tilemap.GetCellCenterWorld(cellCandidate);
+            float distSq = (world.x - center.x) * (world.x - center.x) + (world.y - center.y) * (world.y - center.y);
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                best = cellCandidate;
+            }
+        }
+
+        if (best.x == int.MinValue)
+            return false;
+
+        cell = best;
+        return true;
+    }
+
     bool IsPointerOverBlockingUI()
     {
         if (EventSystem.current == null || Pointer.current == null)
@@ -1180,7 +1232,10 @@ public class Program1 : MonoBehaviour
             return;
         }
 
-        Vector3Int clickedCell = GetMouseCell();
+        Vector3Int clickedCell;
+        if (!TryGetMouseMapCell(out clickedCell))
+            return;
+
         clickedCell.z = 0;
 
         // Ховаємо панель міста при кліку на порожній тайл
@@ -1220,7 +1275,13 @@ public class Program1 : MonoBehaviour
             return;
         }
 
-        Vector3Int hoveredCell = GetMouseCell();
+        if (!TryGetMouseMapCell(out Vector3Int hoveredCell))
+        {
+            HidePathPreview();
+            pathPreviewCached = false;
+            return;
+        }
+
         hoveredCell.z = 0;
 
         if (pathPreviewCached && hoveredCell == lastPathPreviewCell)
@@ -1233,7 +1294,7 @@ public class Program1 : MonoBehaviour
         lastPathPreviewCell = hoveredCell;
         pathPreviewCached = true;
 
-        if (!tilemap.HasTile(hoveredCell) || hoveredCell == selectedUnit.gridPosition)
+        if (hoveredCell == selectedUnit.gridPosition)
         {
             HidePathPreview();
             return;

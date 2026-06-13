@@ -390,7 +390,7 @@ public class CivMainMenuUI : MonoBehaviour
     void BuildSettingsPanel(Transform parent)
     {
         settingsPanel = CreateUIObject("SettingsPanel", parent);
-        SetupModalPanel(settingsPanel, new Vector2(520, 560), true);
+        SetupModalPanel(settingsPanel, new Vector2(520, 760), true);
         settingsPanel.transform.SetAsLastSibling();
 
         GameObject content = CreateUIObject("Content", settingsPanel.transform);
@@ -413,6 +413,7 @@ public class CivMainMenuUI : MonoBehaviour
         BuildVSyncToggle(content.transform);
         BuildSettingRowLabel(content.transform, "MASTER VOLUME");
         BuildVolumeSlider(content.transform);
+        BuildControlHintsSection(content.transform);
         CreateMenuButton(content.transform, "BACK", controller.BackToMenu, true, true, ModalButtonHeight);
         RefreshSettingsVisuals();
     }
@@ -425,6 +426,29 @@ public class CivMainMenuUI : MonoBehaviour
         TextMeshProUGUI tmp = AddText(row, text, 14, GoldDim, FontStyles.Bold, settingsFont);
         StretchFull(tmp.rectTransform);
         tmp.alignment = TextAlignmentOptions.MidlineLeft;
+    }
+
+    void BuildControlHintsSection(Transform parent)
+    {
+        GameObject headerRow = CreateUIObject("ControlHintsHeader", parent);
+        LayoutElement headerLe = headerRow.AddComponent<LayoutElement>();
+        headerLe.preferredHeight = ControlHints.HeaderRowHeight;
+        TextMeshProUGUI header = AddText(headerRow, ControlHints.SectionTitleEn, ControlHints.HeaderFontSize, Gold, FontStyles.Bold, settingsFont);
+        ControlHints.StyleHeader(header);
+        StretchFull(header.rectTransform);
+        header.alignment = TextAlignmentOptions.MidlineLeft;
+
+        foreach (string line in ControlHints.Lines)
+        {
+            GameObject row = CreateUIObject("ControlHint", parent);
+            LayoutElement le = row.AddComponent<LayoutElement>();
+            le.minHeight = ControlHints.LineRowHeight;
+            le.preferredHeight = ControlHints.LineRowHeight;
+            TextMeshProUGUI tmp = AddText(row, line, ControlHints.LineFontSize, Cream, FontStyles.Normal, settingsFont);
+            ControlHints.StyleLine(tmp);
+            StretchFull(tmp.rectTransform);
+            tmp.alignment = TextAlignmentOptions.MidlineLeft;
+        }
     }
 
     TextMeshProUGUI BuildSettingCycleButton(Transform parent, string label, UnityEngine.Events.UnityAction onClick)

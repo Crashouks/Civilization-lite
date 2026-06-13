@@ -52,6 +52,7 @@ public class InGameSettingsPanel : MonoBehaviour
         vsyncButtonText = AddButton(content, "Увімкнено", ToggleVSync);
         AddText(content, "Гучність", 13, false, Gold);
         BuildVolumeSlider(content);
+        AddControlHints(content);
         AddText(content, "Хмарне збереження (MySQL)", 13, false, Gold);
         cloudSaveButtonText = AddButton(content, "Вимкнено", ToggleCloudSave);
         cloudStatusText = AddText(content, "API: " + DatabaseSettings.ApiBaseUrl, 12, false, Cream);
@@ -272,6 +273,27 @@ public class InGameSettingsPanel : MonoBehaviour
         volumeSlider.maxValue = 1f;
         volumeSlider.value = PlayerPrefs.GetFloat(GameSettings.MasterVolumeKey, 0.8f);
         volumeSlider.onValueChanged.AddListener(v => GameSettings.SetMasterVolume(v));
+    }
+
+    void AddControlHints(Transform parent)
+    {
+        TextMeshProUGUI header = AddText(parent, ControlHints.SectionTitleUk, ControlHints.HeaderFontSize, true, Gold);
+        ControlHints.StyleHeader(header);
+        LayoutElement headerLe = header.GetComponent<LayoutElement>();
+        if (headerLe != null)
+            headerLe.preferredHeight = ControlHints.HeaderRowHeight;
+
+        foreach (string line in ControlHints.Lines)
+        {
+            TextMeshProUGUI hint = AddText(parent, line, ControlHints.LineFontSize, false, Cream);
+            ControlHints.StyleLine(hint);
+            LayoutElement lineLe = hint.GetComponent<LayoutElement>();
+            if (lineLe != null)
+            {
+                lineLe.minHeight = ControlHints.LineRowHeight;
+                lineLe.preferredHeight = ControlHints.LineRowHeight;
+            }
+        }
     }
 
     public void Show()
